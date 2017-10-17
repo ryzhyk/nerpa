@@ -196,8 +196,6 @@ procedure hypervisorPortIn(port: HypervisorPort): sink = {
     }
 }*/
 
-//role HypervisorPortOut[port in HypervisorPort] = drop
-
 procedure hypervisorTunPortIn(port: HypervisorTunPort): sink =
 doHypervisorTunPortIn()
 
@@ -211,13 +209,3 @@ procedure doHypervisorTunPortIn(): sink = {
         drop
     }
 }
-
-//role HypervisorTunPortOut[port in HypervisorTunPort] = drop
-
-/*task Advertise[Hypervisor](advertise) @ 120ms
-
-procedure advertise(r: Hypervisor): () = ()
-
-#controller
-procedure update(): sink = drop
-*/
