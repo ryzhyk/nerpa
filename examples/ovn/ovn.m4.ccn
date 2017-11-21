@@ -1,8 +1,4 @@
-// logical switch id
-typedef lswitch_id_t = bit<64>
-
-// logical port id
-typedef lport_id_t = bit<64>
+include(`packet.ccn')
 
 typedef ip4_subnet_t = IP4Subnet { addr : ip4_addr_t
                                  , mask : ip4_addr_t }
@@ -83,10 +79,14 @@ typedef lport_type_t = LPortVM
               a particular port.
 */
 
-table LogicalSwitch( id     : lswitch_id_t
-                   , type   : lswitch_type_t
-                   , name   : string
-                   , subnet : opt_subnet_t
+// logical switch id
+typedef lswitch_id_t = bit<64>
+
+table LogicalSwitch( id           : lswitch_id_t
+                   , stype        : lswitch_type_t
+                   , name         : string
+                   , unknown_addr : bool // true if packets with unknown destination should be sent to this port
+                   , subnet       : opt_subnet_t
                    , primary key (id))
 
 /* Logical switch port addressing
@@ -145,6 +145,8 @@ table LogicalSwitchPortIP( mac   : mac_addr_t
                          , unique (mac, ip)
                          , foreign key (mac) references LogicalSwitchPortMAC(mac))
 
+typedef dynaddr_id_t = bit<64>
+
 table LogicalSwitchPortDynAddr( id    : dynaddr_id_t
                               , lport : lport_id_t
                               , mac   : mac_addr_t  // dynamically allocated
@@ -192,24 +194,36 @@ table LogicalSwitchPortDynAddr( id    : dynaddr_id_t
               158.36.44.24. This would result in generation of gratuitous ARPs for IP addresses 158.36.44.22 and 158.36.44.24 with a  MAC
               address of 80:fa:5b:06:72:b7.
  */
-table LogicalSwitchPort( id        : lport_id_t
-                       , lswitch   : lswitch_id_t
-                       , type      : lport_type_t
-                       , name      : string
-                       , chassis   : chassis_id_t
-                       , enabled   : bool
-                       , addr_type : lport_addr_type_t
+typedef opt_dhcp4_options_id_t = NoDHCP4Options
+                               | SomeDHCP4Options { options : dhcp4_options_id_t }
+typedef opt_dhcp6_options_id_t = NoDHCP6Options
+                               | SomeDHCP6Options { options : dhcp6_options_id_t }
+
+
+// logical port id
+typedef lport_id_t = bit<64>
+
+table LogicalSwitchPort( id            : lport_id_t
+                       , lswitch       : lswitch_id_t
+                       , ptype         : lport_type_t
+                       , name          : string
+                       , chassis       : chassis_id_t
+                       , enabled       : bool
+                       , dhcp4_options : opt_dhcp4_options_id_t
+                       , dhcp6_options : opt_dhcp6_options_id_t
                        , primary key (id)
                        , foreign key (lswitch) references LogicalSwitch(id)
                        , foreign key (chassis) references Chassis(id)
-                       , foreign key (type.rport) references LogicalRouterPort(id) 
-                       , foreign key (type.localnet) references PhysicalNetwork(id) 
-                       , foreign key (type.pnet) references PhysicalNetwork(id) 
-                       , foreign key (type.chassis) references Chassis(id) )
+                       , foreign key (ptype.rport) references LogicalRouterPort(id) 
+                       , foreign key (ptype.localnet) references PhysicalNetwork(id) 
+                       , foreign key (ptype.pnet) references PhysicalNetwork(id) 
+                       , foreign key (ptype.chassis) references Chassis(id) 
+                       , foreign key (dhcp4_options.options) references DHCPv4Options(id) 
+                       , foreign key (dhcp6_options.options) references DHCPv6Options(id) )
 
 /*
    port_security: set of strings
-      This  column  controls  the  addresses  from  which the host attached to the logical port (``the host’’) is allowed to send packets and to which it is
+      This  column  controls  the  addresses  from  which the host attached to the logical port (the host) is allowed to send packets and to which it is
       allowed to receive packets.  If this column is empty, all addresses are permitted.
 
       Each element in the set must begin with one Ethernet address.  This would restrict the host to sending packets from and receiving packets to the  eth‐
@@ -253,8 +267,6 @@ table PortSecurityIP ( mac    : mac_addr_t
                      , primary key (mac)
                      , foreign key (lport) references LogicalSwitchPort(id))
 
-// XXX DHCP options
-
 /*
 Address_Set TABLE
        Each  row  in  this  table  represents  a named set of addresses.  An address set may contain Ethernet, IPv4, or IPv6 addresses with optional bitwise or CIDR
@@ -284,6 +296,9 @@ Address_Set TABLE
        external_ids: map of string-string pairs
               See External IDs at the beginning of this document.
 */
+
+typedef addr_set_id_t = bit<64>
+
 table AddressSet ( id   : addr_set_id_t
                  , name : string
                  , primary key (id)
@@ -291,7 +306,7 @@ table AddressSet ( id   : addr_set_id_t
 
 table AddressSetAddr ( aset : addr_set_id_t
                      , addr : ip_subnet_t
-                     , foreign key (aset) AddressSet(id))
+                     , foreign key (aset) references AddressSet(id))
 
 /*
 Load_Balancer TABLE
@@ -324,17 +339,18 @@ Load_Balancer TABLE
 typedef lb_proto_t = LBTCP
                    | LBUDP
 
+typedef lb_id_t = bit<64>
+
 // XXX: Does LB belong to a unique switch? Does it apply to packets leaving VMs connected to the switch?
 table LoadBalancer ( id      : lb_id_t
                    , name    : string
                    , proto   : lb_proto_t
-                   , primary key (id)
-                   , foreign key (lswitch) references LogicalSwitch(id))
+                   , primary key (id) )
 
 table LBSwitch ( lb      : lb_id_t
                , lswitch : lswitch_id_t
-               , foreign key lb references LoadBalancer (id)
-               , foreign key lswitch references LogicalSwitch(id) )
+               , foreign key (lb) references LoadBalancer(id)
+               , foreign key (lswitch) references LogicalSwitch(id) )
 
 
 typedef ip4_addr_port = IP4AddrPort { addr : ip4_addr_t
@@ -343,7 +359,8 @@ typedef ip4_addr_port = IP4AddrPort { addr : ip4_addr_t
 
 table LBVIP ( lb  : lb_id_t
             , vip : ip4_addr_port
-            , unique(lb,ip))
+            , primary key (lb, vip)
+            , foreign key (lb) references LoadBalancer(id) )
 
 table LBIP ( lb  : lb_id_t
            , vip : ip4_addr_port
@@ -423,7 +440,7 @@ table ACL ( lswitch    : lswitch_id_t
           , direction  : acl_dir_t
           , match_cond : string
           , action     : acl_action_t
-          , foreign key lswitch references LogicalSwitch(id))
+          , foreign key (lswitch) references LogicalSwitch(id))
 
 /*
 Logical_Router TABLE
@@ -474,17 +491,19 @@ Logical_Router TABLE
 typedef lrouter_type_t = RouterRegular
                        | RouterGateway { chassis : chassis_id_t }
 
+typedef lrouter_id_t = bit<64>
+
 table LogicalRouter ( id      : lrouter_id_t 
                     , enabled : bool
                     , name    : string
-                    , type    : lrouter_type_t
+                    , rtype   : lrouter_type_t
                     , primary key (id)
-                    , foreign key (type.chassis) references Chassis(id))
+                    , foreign key (rtype.chassis) references Chassis(id))
 
 table LBRouter ( lb      : lb_id_t
                , lrouter : lrouter_id_t
-               , foreign key lb references LoadBalancer (id)
-               , foreign key lrouter references LogicalRouter(id) )
+               , foreign key (lb) references LoadBalancer(id)
+               , foreign key (lrouter) references LogicalRouter(id) )
 
 /* Logical_Router_Port TABLE
        A port within an L3 logical router.
@@ -535,6 +554,8 @@ table LBRouter ( lb      : lb_id_t
 
  */
 
+typedef lrouter_port_id_t = bit<64>
+
 typedef opt_peer_t = NoPeer
                    | SomePeer { peer : lrouter_port_id_t }
 
@@ -547,12 +568,12 @@ table LogicalRouterPort ( id      : lrouter_port_id_t
                         , primary key (id)
                         , unique (lrouter, name)
                         , unique (mac)
-                        , foreign key lrouter references LogicalRouter(id)
-                        , foreign key peer.peer references LogicalRouterPort)
+                        , foreign key (lrouter) references LogicalRouter(id)
+                        , foreign key (peer.peer) references LogicalRouterPort(id) )
 
 table LRouterPortNetwork ( lport   : lrouter_port_id_t
                          , network : ip_subnet_t 
-                         , foreign key lport references LogicalRouterPort(id) )
+                         , foreign key (lport) references LogicalRouterPort(id) )
 
 /* Logical_Router_Static_Route TABLE
        Each record represents a static route.
@@ -611,14 +632,236 @@ typedef nat_type_t = SNAT
                    | DNAT_SNAT
 
 table NAT ( lrouter     : lrouter_id_t
-          , type        : nat_type_t
+          , ntype       : nat_type_t
           , external_ip : ip4_addr_t
           , logical_ip  : ip4_subnet_t
           , foreign key (lrouter) references LogicalRouter(id) )
 
+/* DHCP_Options TABLE
+       OVN implements native DHCPv4 support which caters to the common use case of providing an IPv4 address to a booting instance by providing stateless replies to
+       DHCPv4 requests based on statically configured address mappings. To do this it allows a short list of DHCPv4 options to be configured  and  applied  at  each
+       compute host running ovn-controller.
+
+       OVN also implements native DHCPv6 support which provides stateless replies to DHCPv6 requests.
+
+   Summary:
+       cidr                          string
+       DHCPv4 options:
+         Mandatory DHCPv4 options:
+            options : server_id      optional string
+            options : server_mac     optional string
+            options : router         optional string
+            options : lease_time     optional string, containing an integer, in range 0 to 4,294,967,295
+         IPv4 DHCP Options:
+            options : netmask        optional string
+            options : dns_server     optional string
+            options : log_server     optional string
+            options : lpr_server     optional string
+            options : swap_server    optional string
+            options : policy_filter  optional string
+            options : router_solicitation
+                                     optional string
+            options : nis_server     optional string
+            options : ntp_server     optional string
+            options : tftp_server    optional string
+            options : classless_static_route
+                                     optional string
+            options : ms_classless_static_route
+                                     optional string
+         Boolean DHCP Options:
+            options : ip_forward_enable
+                                     optional string, either 1 or 0
+            options : router_discovery
+                                     optional string, either 1 or 0
+            options : ethernet_encap optional string, either 1 or 0
+         Integer DHCP Options:
+            options : default_ttl    optional string, containing an integer, in range 0 to 255
+            options : tcp_ttl        optional string, containing an integer, in range 0 to 255
+            options : mtu            optional string, containing an integer, in range 68 to 65,535
+            options : T1             optional string, containing an integer, in range 68 to 4,294,967,295
+            options : T2             optional string, containing an integer, in range 68 to 4,294,967,295
+
+       DHCPv6 options:
+         Mandatory DHCPv6 options:
+            options : server_id      optional string
+         IPv6 DHCPv6 options:
+            options : dns_server     optional string
+         String DHCPv6 options:
+            options : domain_search  optional string
+
+   Details:
+       cidr: string
+              The DHCPv4/DHCPv6 options will be included if the logical port has its IP address in this cidr.
+
+     DHCPv4 options:
+       The  CMS  should define the set of DHCPv4 options as key/value pairs in the options column of this table. For ovn-controller to include these DHCPv4 options,
+       the dhcpv4_options of Logical_Switch_Port should refer to an entry in this table.
+
+     XXX: are these mandatory or optional (as the comments below suggest)
+     Mandatory DHCPv4 options:
+       The following options must be defined.
+
+       options : server_id: optional string
+              The IP address for the DHCP server to use.  This should be in the subnet of the offered IP.  This is also included in the DHCP  offer  as  option  54,
+              server identifier.
+
+       options : server_mac: optional string
+              The Ethernet address for the DHCP server to use.
+
+       options : router: optional string
+              The IP address of a gateway for the client to use.  This should be in the subnet of the offered IP.  The DHCPv4 option code for this option is 3.
+
+       options : lease_time: optional string, containing an integer, in range 0 to 4,294,967,295
+              The offered lease time in seconds,
+
+              The DHCPv4 option code for this option is 51.
+
+     IPv4 DHCP Options:
+       Below are the supported DHCPv4 options whose values are an IPv4 address, e.g. 192.168.1.1.  Some options accept multiple IPv4 addresses enclosed within curly
+       braces, e.g. {192.168.1.2, 192.168.1.3}. Please refer to RFC 2132 for more details on DHCPv4 options and their codes.
+
+       options : netmask: optional string
+              The DHCPv4 option code for this option is 1.
+
+       options : dns_server: optional string
+              The DHCPv4 option code for this option is 6.
+
+       options : log_server: optional string
+              The DHCPv4 option code for this option is 7.
+
+       options : lpr_server: optional string
+              The DHCPv4 option code for this option is 9.
+
+       options : swap_server: optional string
+              The DHCPv4 option code for this option is 16.
+
+       options : policy_filter: optional string
+              The DHCPv4 option code for this option is 21.
+
+       options : router_solicitation: optional string
+              The DHCPv4 option code for this option is 32.
+
+       options : nis_server: optional string
+              The DHCPv4 option code for this option is 41.
+
+       options : ntp_server: optional string
+              The DHCPv4 option code for this option is 42.
+
+       options : tftp_server: optional string
+              The DHCPv4 option code for this option is 66.
+
+       options : classless_static_route: optional string
+              The DHCPv4 option code for this option is 121.
+
+              This option can contain one or more static routes, each of which consists of a destination descriptor and the IP address of the router that should  be
+              used to reach that destination. Please see RFC 3442 for more details.
+
+              Example: {30.0.0.0/24,10.0.0.10, 0.0.0.0/0,10.0.0.1}
+
+       options : ms_classless_static_route: optional string
+              The DHCPv4 option code for this option is 249. This option is similar to classless_static_route supported by Microsoft Windows DHCPv4 clients.
+
+     Boolean DHCP Options:
+       These options accept a Boolean value, expressed as 0 for false or 1 for true.
+
+       options : ip_forward_enable: optional string, either 1 or 0
+              The DHCPv4 option code for this option is 19.
+
+       options : router_discovery: optional string, either 1 or 0
+              The DHCPv4 option code for this option is 31.
+
+       options : ethernet_encap: optional string, either 1 or 0
+              The DHCPv4 option code for this option is 36.
+
+     Integer DHCP Options:
+       These options accept a nonnegative integer value.
+
+       options : default_ttl: optional string, containing an integer, in range 0 to 255
+              The DHCPv4 option code for this option is 23.
+
+       options : tcp_ttl: optional string, containing an integer, in range 0 to 255
+              The DHCPv4 option code for this option is 37.
+
+       options : mtu: optional string, containing an integer, in range 68 to 65,535
+              The DHCPv4 option code for this option is 26.
+
+       options : T1: optional string, containing an integer, in range 68 to 4,294,967,295
+              This  specifies the time interval from address assignment until the client begins trying to renew its address.  The DHCPv4 option code for this option
+              is 58.
+
+       options : T2: optional string, containing an integer, in range 68 to 4,294,967,295
+              This specifies the time interval from address assignment until the client begins trying to rebind its address.  The DHCPv4 option code for this option
+              is 59.
+
+     DHCPv6 options:
+       OVN  also implements native DHCPv6 support. The CMS should define the set of DHCPv6 options as key/value pairs. The define DHCPv6 options will be included in
+       the DHCPv6 response to the DHCPv6 Solicit/Request/Confirm packet from the logical ports having the IPv6 addresses in the cidr.
+
+     Mandatory DHCPv6 options:
+       The following options must be defined.
+
+       options : server_id: optional string
+              The Ethernet address for the DHCP server to use. This is also included in the DHCPv6 reply as option 2, Server Identifier to carry a DUID  identi‐
+              fying a server between a client and a server.  ovn-controller defines DUID based on Link-layer Address [DUID-LL].
+
+     IPv6 DHCPv6 options:
+       Below  are  the  supported  DHCPv6 options whose values are an IPv6 address, e.g. aef0::4.  Some options accept multiple IPv6 addresses enclosed within curly
+       braces, e.g. {aef0::4, aef0::5}. Please refer to RFC 3315 for more details on DHCPv6 options and their codes.
+
+       options : dns_server: optional string
+              The DHCPv6 option code for this option is 23. This option specifies the DNS servers that the VM should use.
+
+     String DHCPv6 options:
+       These options accept string values.
+
+       options : domain_search: optional string
+              The DHCPv6 option code for this option is 24. This option specifies the domain search list the client should use to resolve hostnames with DNS.
+
+              Example: "ovn.org".
+*/
+
+// XXX: encode remaining DHCP options, some of them require support for arrays
+typedef dhcp4_options_t = DHCP4Options { cidr       : ip4_subnet_t
+                                       , server_id  : ip4_addr_t
+                                       , server_mac : mac_addr_t
+                                       , router     : ip4_addr_t
+                                       , lease_time : bit<32> }
+
+typedef duid_t = DUID_LLT  { hw_type : bit<16>
+                           , time    : bit<32>
+                           , mac     : mac_addr_t
+                           }
+               | DUID_EN   { iana_num : bit<32>
+                           , id       : bit<128> // upper bound?
+                           }
+               | DUID_LL   { hw_type : bit<16>
+                           , mac     : mac_addr_t
+                           }
+               | DUID_UUID { uuid : bit<128> }
+
+typedef dhcp6_options_t = DHCP6Options { cidr       : ip4_subnet_t
+                                       , server_id  : duid_t}
+
+
+typedef dhcp4_options_id_t = bit<64>
+
+table DHCPv4Options ( id      : dhcp4_options_id_t
+                    , options : dhcp4_options_t
+                    , primary key (id))
+
+typedef dhcp6_options_id_t = bit<64>
+
+table DHCPv6Options ( id      : dhcp6_options_id_t
+                    , options : dhcp6_options_t
+                    , primary key (id))
+
+typedef pnet_id_t = bit<64>
+
 table PhysicalNetwork( id   : pnet_id_t
                      , name : string
                      , primary key (id) )
+
+typedef chassis_id_t = bit<64>
 
 table Chassis ( id : chassis_id_t
               , primary key (id) )
