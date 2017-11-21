@@ -400,6 +400,13 @@ fields pref t f =
          t'@TStruct{} -> let d = structTypeDef ?r t' in
                          ETNode $ (if' (needsTag d) [("_tag", fields (pref .+ "_tag") (tagType d) f)] []) ++ (map (\fl -> (name fl, fields (pref .+ name fl) (typ fl) f)) $ structFields $ typeCons t')
          TTuple _ as  -> ETNode $ mapIdx (\t' i -> (show i, fields (pref .+ show i) t' f)) as
+         -- Encode strings as 1024-byte bit vectors. Strings should
+         -- not normally be used in the datapath logic, in which case
+         -- the optimizer will eliminate these variables; otherwise
+         -- the register allocator will fail to allocate them.
+         -- TODO: add a validation check that dataplane code does not
+         -- manipulate strings.
+         TString _    -> ETLeaf $ f (I.TBit 8192) pref
          t'           -> error $ "Compile2IR.fields " ++ show t'
 
 
