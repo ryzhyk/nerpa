@@ -6,21 +6,33 @@ set -x
 set -e
 
 THIS_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+INCLUDE_DIR=$THIS_DIR/../examples/include
 
 source $THIS_DIR/../env.sh
 
 filename=$(basename "$1")
-specname="${filename%.*}"
 dir=$(dirname "$1")
+
+if [ ${filename: -7} == ".m4.ccn" ];
+then
+    specname=$(basename "$1" ".m4.ccn")
+    ccnname=$dir/$specname.ccn
+    echo "Preprocessing $1"
+    m4 --include=$INCLUDE_DIR $1 > $ccnname
+else
+    specname=$(basename "$1" ".ccn")
+    ccnname=$1
+fi
+
 workdir=$dir/$specname
 
 echo "Compiling $specname"
 
 (set +x; echo Generating  SQL schema)
-$COCOON_PATH -i $1 --action=sql
+$COCOON_PATH -i $ccnname --action=sql
 
 (set +x; echo Generating Datalog rules)
-$COCOON_PATH -i $1 --action=dl
+$COCOON_PATH -i $ccnname --action=dl
 
 if (( $# > 1 )) && [ $2 = "nodl" ];
 then
@@ -45,4 +57,4 @@ set -e
 sudo psql postgres -f $workdir/$specname.schema
 
 (set +x; echo Starting Cocoon controller)
-sudo $COCOON_PATH -i $1 --action=controller
+sudo $COCOON_PATH -i $ccnname --action=controller
