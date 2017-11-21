@@ -634,8 +634,9 @@ ctxCheckPkt p r ctx =
 -- Relational predicates are allowed in the RHS of rules (at the top level) 
 -- and anywhere inside assumptions
 ctxCheckRelPred :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
-ctxCheckRelPred _ _ (CtxRuleR _ _) = return ()
-ctxCheckRelPred p r ctx            = ctxCheckRelPred' p r ctx
+ctxCheckRelPred _ _ (CtxRuleR _ _)                           = return ()
+ctxCheckRelPred _ _ (CtxUnOp (EUnOp _ Not _) (CtxRuleR _ _)) = return ()
+ctxCheckRelPred p r ctx                                      = ctxCheckRelPred' p r ctx
 
 ctxCheckRelPred' :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckRelPred' _ _ (CtxAssume _) = return ()

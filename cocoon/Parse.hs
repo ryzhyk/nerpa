@@ -253,7 +253,7 @@ relation = do withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "sta
                                          when (rn /= n) $ fail $ "Only rules for relation \"" ++ n ++ "\" can be defined here"
                                          rargs <- parens $ commaSep rexpr
                                          reservedOp ":-"
-                                         rhs <- commaSep $ (withPos erelpred) <|> rexpr
+                                         rhs <- commaSep rexpr
                                          return $ Rule nopos rargs rhs
                            return $ Relation nopos False n as cs $ Just rs
 
@@ -528,7 +528,8 @@ rexpr =  buildExpressionParser retable rterm
     <?> "simple expression"
 
 rterm  = withPos $
-         estruct
+         erelpred
+     <|> estruct
      <|> eint
      <|> ebool
      <|> estring
