@@ -25,6 +25,7 @@ import Data.List
 import Data.Maybe
 import Data.Bits
 import Data.Tuple.Select
+import Data.List.Split
 import qualified Data.Graph.Inductive as G 
 
 import Util
@@ -45,6 +46,9 @@ tuple xs = tuple_ $ filter (/= empty) xs
 tuple_ []  = parens empty
 tuple_ [x] = x
 tuple_ xs  = parens $ commaCat xs
+
+-- Rust does not implement Ord for tuples longer than 12
+small_tuples xs = chunksOf 12 xs
 
 reftuple xs = reftuple_ $ map (filter (/= empty)) xs
 reftuple_ [[x]]  = x
@@ -348,7 +352,7 @@ mkRuleP Rule{..} [] vars pref [] [] =
     -- pref.map(|<vars>|(<args>))
     pref $$ ("." <> "map" <> (parens $ "|" <> _vars <> "|" <+> _args))
     where ERelPred _ args = ruleHead
-          _vars = tuple $ map pp vars
+          _vars = tuple $ map tuple $ small_tuples $ map pp vars
           _args = tuple $ map (mkExpr False) args
 mkRuleP rule [] vars pref [] conds = 
     mkRuleC rule [] vars pref [] conds
@@ -385,8 +389,8 @@ mkRuleP rule@Rule{..} jvars vars pref preds conds =
                     [] -> []
                     _  -> [tuple $ map ((<> ".clone()") . pp) jvars']
     _care' = tuple $ map pp care'
-    _vars' = tuple $ map pp vars'
-    _vars'' = tuple $ map ((<> ".clone()") . pp) vars'
+    _vars' = tuple $ map tuple $ small_tuples $ map pp vars'
+    _vars'' = tuple $ map tuple $ small_tuples $ map ((<> ".clone()") . pp) vars'
     _rargs = reftuple [map (pp . name) relArgs]
     filters = filter (/= empty) $ map (\(ra, a) -> mkFilter (EVar $ name ra) a) $ zip relArgs args
     _filters = case filters of
@@ -489,5 +493,5 @@ mkRuleC rule@Rule{..} jvars vars pref preds conds =
     _conds = mkExpr False {-$ exprMap (\case
                                 EVar v -> EVar $ "(*" ++ v ++ ")"
                                 e      -> e)-} $ conj conds'
-    f = "." <> "filter" <> (parens $ "|" <> (reftuple $ _jvars ++ [_vars]) <> "|" <+> _conds)
+    f = "." <> "filter" <> (parens $ "|" <> (reftuple $ _jvars ++ small_tuples _vars) <> "|" <+> _conds)
     pref' = pref $$ f
