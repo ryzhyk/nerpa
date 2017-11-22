@@ -112,6 +112,8 @@ exprType (EBinOp op e1 e2) = case op of
                              Mod        -> exprType e2
                              ShiftR     -> exprType e1
                              ShiftL     -> exprType e1
+                             BAnd       -> exprType e1
+                             BOr        -> exprType e1
                              Concat     -> TBit $ (typeWidth $ exprType e1) + (typeWidth $ exprType e2)
 exprType (EUnOp Not _)     = TBool
 

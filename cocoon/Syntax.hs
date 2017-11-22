@@ -458,7 +458,7 @@ instance PP Type where
     pp (TString _)      = "string" 
     pp (TBit _ w)       = "bit<" <> pp w <> ">" 
     pp (TArray _ t l)   = brackets $ pp t <> semi <+> pp l
-    pp (TStruct _ cons) = vcat $ punctuate (char '|') $ map pp cons
+    pp (TStruct _ cons) = hcat $ punctuate (" | ") $ map pp cons
     pp (TTuple _ as)    = parens $ hsep $ punctuate comma $ map pp as
     pp (TOpaque _ n)    = pp n
     pp (TUser _ n)      = pp n

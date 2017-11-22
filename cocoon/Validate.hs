@@ -571,6 +571,8 @@ exprValidate2 r _   (EBinOp p op e1 e2) = do case op of
                                                   ShiftR -> do {isint1; isint2} 
                                                   ShiftL -> do {isint1; isint2}
                                                   Mod    -> do {isint1; isint2}
+                                                  BAnd   -> do {m; isbit1}
+                                                  BOr    -> do {m; isbit1}
                                                   Concat -> do {isbit1; isbit2}
                                              --when (elem op [Lt, Gt, Lte, Gte, Plus, Minus, Mod] && isBit r e1) $
                                              --     assertR r ((typeWidth $ typ' r e1) <= sqlMaxIntWidth) p 

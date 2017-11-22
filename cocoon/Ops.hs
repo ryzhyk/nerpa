@@ -36,6 +36,8 @@ data BOp = Eq
          | Mod
          | ShiftR
          | ShiftL
+         | BAnd
+         | BOr
          | Concat
          deriving (Eq)
 
@@ -54,6 +56,8 @@ instance PP BOp where
     pp Mod    = "%"
     pp ShiftR = ">>"
     pp ShiftL = "<<"
+    pp BAnd   = "&"
+    pp BOr    = "|"
     pp Concat = "++"
 
 bopReturnsBool :: BOp -> Bool

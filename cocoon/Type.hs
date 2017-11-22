@@ -118,6 +118,8 @@ exprNodeType' r _   (EBinOp _ op (Just e1) (Just e2)) =
                                        ShiftR -> Just t1
                                        ShiftL -> Just t1
                                        Mod    -> Just t1
+                                       BAnd   -> Just t1
+                                       BOr    -> Just t1
                                        Concat -> Just $ tBit (typeWidth t1 + typeWidth t2)
     where t1 = typ' r e1
           t2 = typ' r e2
@@ -327,6 +329,8 @@ ctxExpectType r (CtxBinOpL e ctx)                    = case exprBOp e of
                                                             ShiftR -> Nothing
                                                             ShiftL -> Nothing
                                                             Mod    -> Nothing
+                                                            BAnd   -> trhs
+                                                            BOr    -> trhs
                                                             Concat -> Nothing
     where trhs = exprTypeMaybe r ctx $ exprRight e
 ctxExpectType r (CtxBinOpR e ctx)                    = case exprBOp e of
@@ -344,6 +348,8 @@ ctxExpectType r (CtxBinOpR e ctx)                    = case exprBOp e of
                                                             ShiftR -> Nothing
                                                             ShiftL -> Nothing
                                                             Mod    -> Nothing
+                                                            BAnd   -> tlhs
+                                                            BOr    -> tlhs
                                                             Concat -> Nothing
     where tlhs = exprTypeMaybe r ctx $ exprLeft e
 ctxExpectType _ (CtxUnOp (EUnOp _ Not _) _)          = Just tBool

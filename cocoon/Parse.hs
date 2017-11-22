@@ -37,7 +37,7 @@ import Util
 import Builtins
 import Name
 
-reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#", "@"]
+reservedOpNames = [":", "?", "!", "|", "&", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#", "@"]
 reservedNames = ["_",
                  "and",
                  "any",
@@ -462,6 +462,8 @@ etable = [[postf $ choice [postSlice, postApply, postBuiltin, postField, postTyp
            binary "<=" Lte AssocNone, 
            binary ">"  Gt  AssocNone, 
            binary ">=" Gte AssocNone]
+         ,[binary "&" BAnd AssocLeft]
+         ,[binary "|" BOr AssocLeft]
          ,[binary "and" And AssocLeft]
          ,[binary "or" Or AssocLeft]
          ,[binary "=>" Impl AssocLeft]
@@ -549,6 +551,8 @@ retable = [[postf $ choice [postSlice, postType]]
            binary "<=" Lte AssocNone, 
            binary ">"  Gt  AssocNone, 
            binary ">=" Gte AssocNone]
+         ,[binary "&" BAnd AssocLeft]
+         ,[binary "|" BOr AssocLeft]
          ,[binary "and" And AssocLeft]
          ,[binary "or" Or AssocLeft]
          ,[binary "=>" Impl AssocLeft]
