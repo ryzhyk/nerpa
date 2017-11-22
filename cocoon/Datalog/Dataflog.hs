@@ -439,7 +439,7 @@ mkExpr _     (EBool False)        = "false"
 mkExpr p     (EBit w i) | w<=64   = pp i
                         | otherwise = mkExpr p $ EInt i
 mkExpr _     (EInt i)             = "Uint::parse_bytes" <> 
-                                    (parens $ "b\"" <> pp i <> "\"" <> comma <+> "10") <> ".unwrap()"
+                                    (parens $ "b\"" <> pp i <> "\"" <> comma <+> "10")
 mkExpr _     (EString s)          = pp $ "\"" ++ s ++ "\""
 mkExpr p     (EStruct c as)       = (pp $ name s) <> "::" <> pp c <> "{"  <> 
                                     (commaSep $ map (\(arg, a) -> (pp $ name arg) <> ":" <+> mkExpr p a) $ zip args as) <> "}"
@@ -463,6 +463,8 @@ mkExpr p     (EBinOp op e1 e2)    =
          ShiftR -> f ">>"
          ShiftL -> f "<<"
          Impl   -> mkExpr p $ EBinOp Or (EUnOp Not e1) e2
+         BAnd   -> f "&"
+         BOr    -> f "|"
          Concat -> error "not implemented: Dataflog.mkExpr Concat"
     where f o = parens $ mkExpr p e1 <+> o <+> mkExpr p e2
 mkExpr p     (EUnOp Not e)        = parens $ "!" <> mkExpr p e
