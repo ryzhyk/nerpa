@@ -51,3 +51,15 @@ view PortSecurityIP6Match( lport  : lport_id_t
 
 PortSecurityIP6Match(lport, mac, IP6Subnet{0,0}) :- PortSecurityMAC(lport, mac), not PortIPSecurityEnabled(lport)
 PortSecurityIP6Match(lport, mac, subnet)         :- PortSecurityMAC(lport, mac), PortSecurityIP(lport, mac, IPSubnet6{subnet})
+
+// ACLs
+view LPortStatefulACL(lport : lport_id_t)
+
+LPortStatefulACL(lport) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, _, _, _), ACL(lswitch, _, _, _, ACLAllowRelated)
+LPortStatefulACL(lport) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, _, _, _), ACL(lswitch, _, _, _, ACLAllow)
+
+// Load balancing
+view LPortLBVIP( lport : lport_id_t
+               , vip   : ip4_addr_t)
+
+LPortLBVIP(lport, vip) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, _, _, _), LBSwitch(lb, lswitch), LBVIP(lb, IP4AddrPort{vip, _})

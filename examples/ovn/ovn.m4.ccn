@@ -25,6 +25,7 @@ procedure vSwitchIngress(port: VSwitchPort): sink = {
 procedure lportIngress(lport: LogicalSwitchPort, p: Packet): sink = {
     if (not portSecurityAllowed(lport, pkt)) drop;
     // Run through connection tracker if needed
+    connTrack(lport);
 
 /*
     (allowed, commit) = acl();
@@ -149,6 +150,19 @@ function portSecNDP(lport: LogicalSwitchPort, p: Packet): bool = {
             } default { false },
         _ -> true
     }
+}
+
+procedure connTrack(lport : LogicalSwitchPort): () = {
+    var needCT = false;
+    the (lp in LPortStatefulACL | lp.lport == lport.id) {
+        needCT = true
+    } default { () };
+
+    the (lbvip in LPortLBVIP | lbvip.lport == lport.id and lbvip.vip == pkt.payload.ip4.dst) {
+        needCT = true
+    } default { () }
+
+    // TODO: call ct
 }
 
 procedure lportEgress(port: LogicalSwitchPort): sink = drop 
