@@ -108,16 +108,16 @@ function ipSrcMatch(p: eth_payload_t, subnet: ip_subnet_t): bool = {
 
 function isPktDHCPDiscovery(p: Packet): bool = {
     match (p) {
-        EthPacket {_,_,_,_,_,EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,sip,dip,IPUDP{UDPPkt{sport,dport,_}}}}} -> 
+        EthPacket {_,_,_,_,_,_,EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,sip,dip,IPUDP{UDPPkt{sport,dport,_}}}}} -> 
             sip == 0 and dip == 32'hffffffff and sport == 68 and dport == 67,
-        _                                                                                          -> false
+        _                                                                                            -> false
     }
 }
 
 function isPktDAD(p: Packet): bool = {
     match (p) {
-        EthPacket {_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,sip,_,IPICMP6{ICMP6Pkt{ptype,_,_}}}}} -> ptype == 135 and sip == 0,
-        _                                                                                  -> false
+        EthPacket {_,_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,sip,_,IPICMP6{ICMP6Pkt{ptype,_,_}}}}} -> ptype == 135 and sip == 0,
+        _                                                                                    -> false
     }
 }
 
@@ -140,11 +140,11 @@ function portSecARP(lport: LogicalSwitchPort, p: Packet): bool = {
 
 function portSecNDP(lport: LogicalSwitchPort, p: Packet): bool = {
     match (p) {
-        EthPacket {_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{_, sll}}}}}}} -> 
+        EthPacket {_,_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{_, sll}}}}}}} -> 
             the (psec in PortSecurityMAC | psec.lport == lport.id and psec.mac == p.src and psec.mac == sll) {
                 true
             } default { false },
-        EthPacket {_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NA{ICMP6NAPkt{target, tll}}}}}}} -> 
+        EthPacket {_,_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NA{ICMP6NAPkt{target, tll}}}}}}} -> 
             the (psec in PortSecurityIP6Match | psec.lport == lport.id and psec.mac == p.src and psec.mac == tll and ip6Match(target, psec.subnet)) {
                 true
             } default { false },
@@ -160,9 +160,9 @@ procedure connTrack(lport : LogicalSwitchPort): () = {
 
     the (lbvip in LPortLBVIP | lbvip.lport == lport.id and lbvip.vip == pkt.payload.ip4.dst) {
         needCT = true
-    } default { () }
+    } default { () };
 
-    // TODO: call ct
+    pkt.ct.track = true
 }
 
 procedure lportEgress(port: LogicalSwitchPort): sink = drop 
