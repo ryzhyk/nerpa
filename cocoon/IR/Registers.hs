@@ -188,10 +188,14 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
         rename' e = e
     let g :: NodeId -> Node -> Node
         g _  node = case node of
-                         Fork t vs pl' b       -> let cfg = plCFG pl' in
-                                                  Fork t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg}) b
-                         Lookup t vs pl' th el -> let cfg = plCFG pl' in
-                                                  Lookup t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg}) th el
+                         Fork t vs fpl' b       -> Fork t (vars2fnames vs) (\rec -> 
+                                                                            let pl' = fpl' rec
+                                                                                cfg = plCFG pl' in
+                                                                            pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg}) b
+                         Lookup t vs fpl' th el -> Lookup t (vars2fnames vs) (\rec ->   
+                                                                               let pl' = fpl' rec
+                                                                                   cfg = plCFG pl' in
+                                                                               pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg}) th el
                          Cond cs               -> Cond $ map (mapFst rename) cs
                          Par bs                -> Par bs
         f :: CFG -> CFGCtx -> Maybe Action

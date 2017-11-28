@@ -89,6 +89,7 @@ typ2SMT x = case typ' ?r x of
                  (TTuple _ ts) -> SMT.TTuple $ map typ2SMT ts
                  TArray _ t l  -> SMT.TArray (typ2SMT t) l
                  TLocation _   -> SMT.TBit 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
+                 TLambda _ _ _ -> SMT.TString
                  t             -> error $ "SMT.typ2SMT " ++ show t
 
 -- TODO: preprocess expression, substituting variables in the action

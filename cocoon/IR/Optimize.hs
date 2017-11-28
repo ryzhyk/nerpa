@@ -137,8 +137,8 @@ varSubstNode cfg nd node = do
         node' = foldl' (\node_ (v, e) -> 
                          --trace ("substitute " ++ v ++  " with " ++ show e ++ "\n         at node " ++ show node) $
                          case node_ of
-                              Fork{..}   -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = plSubstVar v e nodePL}
-                              Lookup{..} -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = plSubstVar v e nodePL}
+                              Fork{..}   -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = \rec -> plSubstVar v e (nodePL rec)}
+                              Lookup{..} -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = \rec -> plSubstVar v e (nodePL rec)}
                               Cond{..}   -> node_{nodeConds = map (\(c,b) -> (exprSubstVar v e c, b)) nodeConds}
                               Par{}      -> error "IROptimize.varSubstNode Par") 
                        node substs

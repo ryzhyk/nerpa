@@ -61,7 +61,7 @@ ovsBuildSwitch workdir r sw f@(DL.Fact rname _) ir db = do
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        cmds = OF.buildSwitch r (ir M.! name sw) db swid
+        cmds = OF.buildSwitch r ovsStructReify (ir M.! name sw) db swid
     ovsResetSwitch workdir r sw f
     sendCmds workdir rname swid swaddr swname cmds
 
@@ -71,7 +71,7 @@ ovsUpdateSwitch workdir r sw f@(DL.Fact rname _) ir delta = do
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        cmds = OF.updateSwitch r (ir M.! name sw) swid delta
+        cmds = OF.updateSwitch r ovsStructReify (ir M.! name sw) swid delta
     when (not $ null cmds) $ sendCmds workdir rname swid swaddr swname cmds
 
 ovsResetSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> IO ()

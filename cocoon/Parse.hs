@@ -37,7 +37,7 @@ import Util
 import Builtins
 import Name
 
-reservedOpNames = [":", "?", "!", "|", "&", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#", "@"]
+reservedOpNames = [":", "?", "!", "|", "&", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#", "@", "\\"]
 reservedNames = ["_",
                  "and",
                  "any",
@@ -285,6 +285,7 @@ typeSpec = withPos $
         <|> structType 
         <|> userType 
         <|> tupleType
+        <|> lambdaType
         
 typeSpecSimple = withPos $ 
                   arrType
@@ -294,6 +295,7 @@ typeSpecSimple = withPos $
               <|> boolType 
               <|> tupleType
               <|> userType 
+              <|> lambdaType
 
 bitType    = TBit    nopos <$ reserved "bit" <*> (fromIntegral <$> angles decimal)
 intType    = TInt    nopos <$ reserved "int"
@@ -307,6 +309,9 @@ tupleType  = (\fs -> case fs of
                           [f] -> f
                           _   -> TTuple nopos fs)
              <$> (parens $ commaSep typeSpecSimple)
+lambdaType = TLambda nopos <$  (reserved "function")
+                           <*> (parens $ commaSep arg) 
+                           <*> (colon *> typeSpecSimple)
 
 constructor = withPos $ Constructor nopos <$> consIdent <*> (option [] $ braces $ commaSep arg)
 
@@ -339,6 +344,14 @@ term' = withPos $
      <|> efor
      <|> ewith
      <|> eany
+     <|> elambda
+     <|> eapplambda
+
+elambda = eLambda <$ reservedOp "\\" <*> (parens $ commaSep arg) 
+                                     <*> (colon *> typeSpecSimple)
+                                     <*> (reservedOp "=" *> expr) 
+
+eapplambda = eApplyLambda <$ reserved "eval" <*> (parens expr) <*> (parens $ commaSep expr)
 
 eapply = eApply <$ isapply <*> funcIdent <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ do 

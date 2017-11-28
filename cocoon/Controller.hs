@@ -56,7 +56,7 @@ import qualified Datalog                 as DL
 import qualified SMT                     as SMT
 import qualified SMT.SMTSolver           as SMT
 import qualified IR.IR                   as IR
-import qualified IR.Compile2IR           as IR
+--import qualified IR.Compile2IR           as IR
 
 -- Messages sent by the primary controller thread to the
 -- synchronization thread.
@@ -458,7 +458,7 @@ readDelta = do
                                                       let facts' = map (\(DL.Fact _ ((SMT.EBool p):as)) -> (p, DL.Fact rname as)) facts
                                                       return (rname, facts')) usedandsw
    let irdelta = M.mapWithKey (\rname facts -> 
-                                map (mapSnd $ (IR.val2Record ctlRefine (backendStructs ctlBackend) rname) . eStruct rname . map SMT.exprFromSMT . DL.factArgs) facts) 
+                                map (mapSnd $ {-(IR.val2Record ctlRefine (backendStructs ctlBackend) rname) .-} eStruct rname . map SMT.exprFromSMT . DL.factArgs) facts) 
                  $ M.restrictKeys ofdelta $ S.fromList used
    putStrLn $ "Delta:\n  " ++ 
               (intercalate "\n  " $ map (\(rel, fs) -> rel ++ ":" ++ 
@@ -469,13 +469,12 @@ readDelta = do
 readRealized :: (?s::ControllerState p) => [String] -> IO IR.DB
 readRealized rels =
     liftM M.fromList
-    $ mapM (\rel -> do recs <- enumRelationIR (relRealizedName $ name rel) (name rel)
+    $ mapM (\rel -> do recs <- enumRelation (relRealizedName $ name rel) (name rel)
                        return (name rel, recs))
            rels
 
-
-enumRelationIR :: (?s::ControllerState p) => String -> String -> IO [IR.Record]
-enumRelationIR nrel nconstr = do
+enumRelation :: (?s::ControllerState p) => String -> String -> IO [Expr]
+enumRelation nrel nconstr = do
     let ControllerConnected{..} = ?s
     facts <- DL.enumRelation ctlDL nrel
-    return $ map (IR.val2Record ctlRefine (backendStructs ctlBackend) nconstr . eStruct nconstr . map SMT.exprFromSMT . DL.factArgs) facts
+    return $ map ({-IR.val2Record ctlRefine (backendStructs ctlBackend) nconstr .-} eStruct nconstr . map SMT.exprFromSMT . DL.factArgs) facts

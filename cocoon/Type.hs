@@ -21,7 +21,7 @@ module Type( WithType(..)
            , exprTypes
            , exprTraverseTypeM
            , typ', typ''
-           , isBool, isBit, isInt, isLocation, isStruct, isArray, isTuple
+           , isBool, isBit, isInt, isLocation, isStruct, isArray, isTuple, isLambda
            , matchType, matchType'
            , ctxExpectType
            , typeSubtypes
@@ -96,9 +96,9 @@ exprNodeType' _ _   (EMatch _ _ cs)       = snd $ head cs
 exprNodeType' r ctx (EVarDecl _ _)        = ctxExpectType r ctx
 exprNodeType' _ _   (ESeq _ _ e2)         = e2
 exprNodeType' _ _   (EPar _ _ _)          = Just tSink
-exprNodeType' r _   (EITE _ _ t e)        = if (maybe False (\t' -> typ' r t' == tSink) t)
-                                            then maybe (Just $ tTuple []) id e
-                                            else t
+exprNodeType' r _   (EITE _ _ t e)        = if maybe False (\t' -> typ' r t' == tSink) t
+                                               then maybe (Just $ tTuple []) id e
+                                               else t
 exprNodeType' _ _   (EDrop _)             = Just tSink
 exprNodeType' _ _   (ESet _ _ _)          = Just $ tTuple []
 exprNodeType' _ _   (ESend  _ _)          = Just tSink
@@ -139,6 +139,10 @@ exprNodeType' _ _   (ETyped _ _ t)         = Just t
 exprNodeType' _ _   (ERelPred _ _ _)       = Just tBool
 exprNodeType' _ _   (EPut _ _ _)           = Just $ tTuple []
 exprNodeType' _ _   (EDelete _ _ _)        = Just $ tTuple []
+exprNodeType' _ _   (ELambda _ as r _)     = Just $ tLambda as r
+exprNodeType' _ _   (EApplyLambda _ l _)   = case l of 
+                                                  Just (TLambda _ _ t) -> Just t
+                                                  _                    -> Nothing
 
 
 exprTypes :: Refine -> ECtx -> Expr -> [Type]
@@ -194,6 +198,10 @@ isTuple r a = case typ' r a of
                    TTuple _ _ -> True
                    _          -> False
 
+isLambda :: (WithType a) => Refine -> a -> Bool
+isLambda r a = case typ' r a of
+                    TLambda _ _ _ -> True
+                    _             -> False
 
 matchType :: (MonadError String me, WithType a, WithType b) => Pos -> Refine -> a -> b -> me ()
 matchType p r x y = assertR r (matchType' r x y) p $ "Incompatible types " ++ show (typ x) ++ " and " ++ show (typ y)
@@ -368,4 +376,10 @@ ctxExpectType r (CtxRelPred e _ i)                   = let args = relArgs $ getR
                                                        if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType r (CtxPut (EPut _ rel _) _)            = Just $ relRecordType $ getRelation r rel
 ctxExpectType _ (CtxDelete _ _)                      = Just tBool
+ctxExpectType _ (CtxLambda e _)                      = Just $ exprLambdaType e
+ctxExpectType _ (CtxApplyLambda _ _)                 = Nothing
+ctxExpectType r (CtxApplyLambdaArg e@(EApplyLambda _ l _) ctx i)
+                                                     = case exprTypeMaybe r (CtxApplyLambda e ctx) l of
+                                                            Just (TLambda _ ats _) -> Just (typ $ ats!!i)
+                                                            _                      -> Nothing
 ctxExpectType _ ctx                                  = error $ "ctxExpectType " ++ show ctx

@@ -34,6 +34,7 @@ import Data.Functor.Identity
 import Util
 import Ops
 import PP
+import qualified Syntax as C
 
 type NodeId    = G.Node
 type VarName   = String
@@ -202,10 +203,10 @@ disj' (e:es) = EBinOp Or e (disj' es)
 type Record = M.Map ColName Expr
 
 -- Database delta: maps relation name into a set of facts with polarities.
-type Delta = M.Map RelName [(Bool, Record)]
+type Delta = M.Map RelName [(Bool, C.Expr)]
 
 -- Database snapshot
-type DB    = M.Map RelName [Record]
+type DB    = M.Map RelName [C.Expr]
 
 data Action = ASet        Expr Expr
             -- | APut        String [Expr]
@@ -258,8 +259,8 @@ instance Show BB where
 bbVars :: BB -> [VarName]
 bbVars (BB as _) = nub $ concatMap actionVars as
 
-data Node = Fork   {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: Pipeline, nodeBB::BB}  -- list of vars fork condition depends on (prevents these var from being optimized away)
-          | Lookup {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: Pipeline, nodeThen :: BB, nodeElse :: BB}
+data Node = Fork   {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: C.Expr -> Pipeline, nodeBB::BB}  -- list of vars fork condition depends on (prevents these var from being optimized away)
+          | Lookup {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: C.Expr -> Pipeline, nodeThen :: BB, nodeElse :: BB}
           | Cond   {nodeConds :: [(Expr, BB)]}
           | Par    {nodeBBs :: [BB]}
 

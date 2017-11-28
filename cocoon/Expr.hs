@@ -77,93 +77,98 @@ exprFoldCtxM :: (Monad m) => (ECtx -> ExprNode b -> m b) -> ECtx -> Expr -> m b
 exprFoldCtxM f ctx (E n) = exprFoldCtxM' f ctx n
 
 exprFoldCtxM' :: (Monad m) => (ECtx -> ExprNode b -> m b) -> ECtx -> ENode -> m b
-exprFoldCtxM' f ctx   (EVar p v)          = f ctx $ EVar p v
-exprFoldCtxM' f ctx   (EPacket p)         = f ctx $ EPacket p
-exprFoldCtxM' f ctx e@(EBuiltin p fun as) = f ctx =<< (liftM $ EBuiltin p fun) (mapIdxM (\a i -> exprFoldCtxM f (CtxBuiltin e ctx i) a) as)
-exprFoldCtxM' f ctx e@(EApply p fun as)   = f ctx =<< (liftM $ EApply p fun) (mapIdxM (\a i -> exprFoldCtxM f (CtxApply e ctx i) a) as)
-exprFoldCtxM' f ctx e@(EField p s fl)     = do s' <- exprFoldCtxM f (CtxField e ctx) s
-                                               f ctx $ EField p s' fl
-exprFoldCtxM' f ctx e@(ELocation p r a d) = f ctx =<< (liftM $ \a' -> ELocation p r a' d) (exprFoldCtxM f (CtxLocation e ctx) a)
-exprFoldCtxM' f ctx   (EBool p b)         = f ctx $ EBool p b
-exprFoldCtxM' f ctx   (EInt p i)          = f ctx $ EInt p i
-exprFoldCtxM' f ctx   (EString p s)       = f ctx $ EString p s
-exprFoldCtxM' f ctx   (EBit p w v)        = f ctx $ EBit p w v
-exprFoldCtxM' f ctx e@(EStruct p c fs)    = f ctx =<< (liftM $ EStruct p c) (mapIdxM (\fl i -> exprFoldCtxM f (CtxStruct e ctx i) fl) fs)
-exprFoldCtxM' f ctx e@(ETuple p fs)       = f ctx =<< (liftM $ ETuple p) (mapIdxM (\fl i -> exprFoldCtxM f (CtxTuple e ctx i) fl) fs)
-exprFoldCtxM' f ctx e@(ESlice p v h l)    = do v' <- exprFoldCtxM f (CtxSlice e ctx) v
-                                               f ctx $ ESlice p v' h l
-exprFoldCtxM' f ctx e@(EMatch p m cs)     = do m' <- exprFoldCtxM f (CtxMatchExpr e ctx) m
-                                               cs' <- mapIdxM (\(e1, e2) i -> liftM2 (,) (exprFoldCtxM f (CtxMatchPat e ctx i) e1) 
-                                                                                         (exprFoldCtxM f (CtxMatchVal e ctx i) e2)) cs
-                                               f ctx $ EMatch p m' cs'
-exprFoldCtxM' f ctx   (EVarDecl p v)      = f ctx $ EVarDecl p v
-exprFoldCtxM' f ctx e@(ESeq p l r)        = f ctx =<< (liftM2 $ ESeq p) (exprFoldCtxM f (CtxSeq1 e ctx) l) (exprFoldCtxM f (CtxSeq2 e ctx) r)
-exprFoldCtxM' f ctx e@(EPar p l r)        = f ctx =<< (liftM2 $ EPar p) (exprFoldCtxM f (CtxPar1 e ctx) l) (exprFoldCtxM f (CtxPar2 e ctx) r)
-exprFoldCtxM' f ctx e@(EITE p i t me)     = f ctx =<< (liftM3 $ EITE p) 
-                                                      (exprFoldCtxM f (CtxITEIf e ctx) i) 
-                                                      (exprFoldCtxM f (CtxITEThen e ctx) t) 
-                                                      (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxITEElse e ctx)) me)
-exprFoldCtxM' f ctx   (EDrop p)           = f ctx $ EDrop p
-exprFoldCtxM' f ctx e@(ESet p l r)        = f ctx =<< (liftM2 $ ESet p) (exprFoldCtxM f (CtxSetL e ctx) l) (exprFoldCtxM f (CtxSetR e ctx) r)
-exprFoldCtxM' f ctx e@(ESend p d)         = f ctx =<< (liftM $ ESend p) (exprFoldCtxM f (CtxSend e ctx) d)
-exprFoldCtxM' f ctx e@(EBinOp p op l r)   = f ctx =<< (liftM2 $ EBinOp p op) (exprFoldCtxM f (CtxBinOpL e ctx) l) 
-                                                                             (exprFoldCtxM f (CtxBinOpR e ctx) r)
-exprFoldCtxM' f ctx e@(EUnOp p op x)      = f ctx =<< (liftM $ EUnOp p op) (exprFoldCtxM f (CtxUnOp e ctx) x)
-exprFoldCtxM' f ctx e@(EFor p v t c b)    = f ctx =<< (liftM2 $ EFor p v t) (exprFoldCtxM f (CtxForCond e ctx) c) 
-                                                                            (exprFoldCtxM f (CtxForBody e ctx) b)
-exprFoldCtxM' f ctx e@(EFork p v t c b)   = f ctx =<< (liftM2 $ EFork p v t) (exprFoldCtxM f (CtxForkCond e ctx) c) 
-                                                                             (exprFoldCtxM f (CtxForkBody e ctx) b)
-exprFoldCtxM' f ctx e@(EWith p v t c b d) = f ctx =<< (liftM3 $ EWith p v t) 
-                                                      (exprFoldCtxM f (CtxWithCond e ctx) c) 
-                                                      (exprFoldCtxM f (CtxWithBody e ctx) b)    
-                                                      (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxWithDef e ctx)) d)
-exprFoldCtxM' f ctx e@(EAny p v t c b d)  = f ctx =<< (liftM3 $ EAny p v t) 
-                                                      (exprFoldCtxM f (CtxAnyCond e ctx) c) 
-                                                      (exprFoldCtxM f (CtxAnyBody e ctx) b)    
-                                                      (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxAnyDef e ctx)) d)
-exprFoldCtxM' f ctx   (EPHolder p)        = f ctx $ EPHolder p
-exprFoldCtxM' f ctx   (EAnon p)           = f ctx $ EAnon p
-exprFoldCtxM' f ctx e@(ETyped p x t)      = do x' <- exprFoldCtxM f (CtxTyped e ctx) x
-                                               f ctx $ ETyped p x' t
-exprFoldCtxM' f ctx e@(ERelPred p rel as) = f ctx =<< (liftM $ ERelPred p rel) (mapIdxM (\a i -> exprFoldCtxM f (CtxRelPred e ctx i) a) as)
-exprFoldCtxM' f ctx e@(EPut p rel v)      = f ctx =<< (liftM $ EPut p rel) (exprFoldCtxM f (CtxPut e ctx) v)
-exprFoldCtxM' f ctx e@(EDelete p rel c)   = f ctx =<< (liftM $ EDelete p rel) (exprFoldCtxM f (CtxDelete e ctx) c)
+exprFoldCtxM' f ctx   (EVar p v)              = f ctx $ EVar p v
+exprFoldCtxM' f ctx   (EPacket p)             = f ctx $ EPacket p
+exprFoldCtxM' f ctx e@(EBuiltin p fun as)     = f ctx =<< (liftM $ EBuiltin p fun) (mapIdxM (\a i -> exprFoldCtxM f (CtxBuiltin e ctx i) a) as)
+exprFoldCtxM' f ctx e@(EApply p fun as)       = f ctx =<< (liftM $ EApply p fun) (mapIdxM (\a i -> exprFoldCtxM f (CtxApply e ctx i) a) as)
+exprFoldCtxM' f ctx e@(EField p s fl)         = do s' <- exprFoldCtxM f (CtxField e ctx) s
+                                                   f ctx $ EField p s' fl
+exprFoldCtxM' f ctx e@(ELocation p r a d)     = f ctx =<< (liftM $ \a' -> ELocation p r a' d) (exprFoldCtxM f (CtxLocation e ctx) a)
+exprFoldCtxM' f ctx   (EBool p b)             = f ctx $ EBool p b
+exprFoldCtxM' f ctx   (EInt p i)              = f ctx $ EInt p i
+exprFoldCtxM' f ctx   (EString p s)           = f ctx $ EString p s
+exprFoldCtxM' f ctx   (EBit p w v)            = f ctx $ EBit p w v
+exprFoldCtxM' f ctx e@(EStruct p c fs)        = f ctx =<< (liftM $ EStruct p c) (mapIdxM (\fl i -> exprFoldCtxM f (CtxStruct e ctx i) fl) fs)
+exprFoldCtxM' f ctx e@(ETuple p fs)           = f ctx =<< (liftM $ ETuple p) (mapIdxM (\fl i -> exprFoldCtxM f (CtxTuple e ctx i) fl) fs)
+exprFoldCtxM' f ctx e@(ESlice p v h l)        = do v' <- exprFoldCtxM f (CtxSlice e ctx) v
+                                                   f ctx $ ESlice p v' h l
+exprFoldCtxM' f ctx e@(EMatch p m cs)         = do m' <- exprFoldCtxM f (CtxMatchExpr e ctx) m
+                                                   cs' <- mapIdxM (\(e1, e2) i -> liftM2 (,) (exprFoldCtxM f (CtxMatchPat e ctx i) e1) 
+                                                                                             (exprFoldCtxM f (CtxMatchVal e ctx i) e2)) cs
+                                                   f ctx $ EMatch p m' cs'
+exprFoldCtxM' f ctx   (EVarDecl p v)          = f ctx $ EVarDecl p v
+exprFoldCtxM' f ctx e@(ESeq p l r)            = f ctx =<< (liftM2 $ ESeq p) (exprFoldCtxM f (CtxSeq1 e ctx) l) (exprFoldCtxM f (CtxSeq2 e ctx) r)
+exprFoldCtxM' f ctx e@(EPar p l r)            = f ctx =<< (liftM2 $ EPar p) (exprFoldCtxM f (CtxPar1 e ctx) l) (exprFoldCtxM f (CtxPar2 e ctx) r)
+exprFoldCtxM' f ctx e@(EITE p i t me)         = f ctx =<< (liftM3 $ EITE p) 
+                                                          (exprFoldCtxM f (CtxITEIf e ctx) i) 
+                                                          (exprFoldCtxM f (CtxITEThen e ctx) t) 
+                                                          (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxITEElse e ctx)) me)
+exprFoldCtxM' f ctx   (EDrop p)               = f ctx $ EDrop p
+exprFoldCtxM' f ctx e@(ESet p l r)            = f ctx =<< (liftM2 $ ESet p) (exprFoldCtxM f (CtxSetL e ctx) l) (exprFoldCtxM f (CtxSetR e ctx) r)
+exprFoldCtxM' f ctx e@(ESend p d)             = f ctx =<< (liftM $ ESend p) (exprFoldCtxM f (CtxSend e ctx) d)
+exprFoldCtxM' f ctx e@(EBinOp p op l r)       = f ctx =<< (liftM2 $ EBinOp p op) (exprFoldCtxM f (CtxBinOpL e ctx) l) 
+                                                                                 (exprFoldCtxM f (CtxBinOpR e ctx) r)
+exprFoldCtxM' f ctx e@(EUnOp p op x)          = f ctx =<< (liftM $ EUnOp p op) (exprFoldCtxM f (CtxUnOp e ctx) x)
+exprFoldCtxM' f ctx e@(EFor p v t c b)        = f ctx =<< (liftM2 $ EFor p v t) (exprFoldCtxM f (CtxForCond e ctx) c) 
+                                                                                (exprFoldCtxM f (CtxForBody e ctx) b)
+exprFoldCtxM' f ctx e@(EFork p v t c b)       = f ctx =<< (liftM2 $ EFork p v t) (exprFoldCtxM f (CtxForkCond e ctx) c) 
+                                                                                 (exprFoldCtxM f (CtxForkBody e ctx) b)
+exprFoldCtxM' f ctx e@(EWith p v t c b d)     = f ctx =<< (liftM3 $ EWith p v t) 
+                                                          (exprFoldCtxM f (CtxWithCond e ctx) c) 
+                                                          (exprFoldCtxM f (CtxWithBody e ctx) b)    
+                                                          (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxWithDef e ctx)) d)
+exprFoldCtxM' f ctx e@(EAny p v t c b d)      = f ctx =<< (liftM3 $ EAny p v t) 
+                                                          (exprFoldCtxM f (CtxAnyCond e ctx) c) 
+                                                          (exprFoldCtxM f (CtxAnyBody e ctx) b)    
+                                                          (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxAnyDef e ctx)) d)
+exprFoldCtxM' f ctx   (EPHolder p)            = f ctx $ EPHolder p
+exprFoldCtxM' f ctx   (EAnon p)               = f ctx $ EAnon p
+exprFoldCtxM' f ctx e@(ETyped p x t)          = do x' <- exprFoldCtxM f (CtxTyped e ctx) x
+                                                   f ctx $ ETyped p x' t
+exprFoldCtxM' f ctx e@(ERelPred p rel as)     = f ctx =<< (liftM $ ERelPred p rel) (mapIdxM (\a i -> exprFoldCtxM f (CtxRelPred e ctx i) a) as)
+exprFoldCtxM' f ctx e@(EPut p rel v)          = f ctx =<< (liftM $ EPut p rel) (exprFoldCtxM f (CtxPut e ctx) v)
+exprFoldCtxM' f ctx e@(EDelete p rel c)       = f ctx =<< (liftM $ EDelete p rel) (exprFoldCtxM f (CtxDelete e ctx) c)
+exprFoldCtxM' f ctx e@(ELambda p as r l)      = f ctx =<< (liftM $ ELambda p as r) (exprFoldCtxM f (CtxLambda e ctx) l)
+exprFoldCtxM' f ctx e@(EApplyLambda p l as)   = f ctx =<< (liftM2 $ EApplyLambda p) (exprFoldCtxM f (CtxApplyLambda e ctx) l)
+                                                                                    (mapIdxM (\a i -> exprFoldCtxM f (CtxApplyLambdaArg e ctx i) a) as)
 
 exprMapM :: (Monad m) => (a -> m b) -> ExprNode a -> m (ExprNode b)
 exprMapM g e = case e of
-                   EVar p v           -> return $ EVar p v
-                   EPacket p          -> return $ EPacket p
-                   EBuiltin p f as    -> (liftM $ EBuiltin p f) $ mapM g as
-                   EApply p f as      -> (liftM $ EApply p f) $ mapM g as
-                   EField p s f       -> (liftM $ \s' -> EField p s' f) $ g s
-                   ELocation p rl a d -> (liftM $ \a' -> ELocation p rl a' d) $ g a
-                   EBool p b          -> return $ EBool p b
-                   EInt p i           -> return $ EInt p i
-                   EString p s        -> return $ EString p s
-                   EBit p w v         -> return $ EBit p w v
-                   EStruct p s fs     -> (liftM $ EStruct p s) $ mapM g fs
-                   ETuple p fs        -> (liftM $ ETuple p) $ mapM g fs
-                   ESlice p v h l     -> (liftM $ \v' -> ESlice p v' h l) $ g v
-                   EMatch p m cs      -> (liftM2 $ EMatch p) (g m) $ mapM (\(e1, e2) -> liftM2 (,) (g e1) (g e2)) cs
-                   EVarDecl p v       -> return $ EVarDecl p v
-                   ESeq p l r         -> (liftM2 $ ESeq p) (g l) (g r)
-                   EPar p l r         -> (liftM2 $ ESeq p) (g l) (g r)
-                   EITE p i t me      -> (liftM3 $ EITE p) (g i) (g t) (maybe (return Nothing) (liftM Just . g) me)
-                   EDrop p            -> return $ EDrop p
-                   ESet p l r         -> (liftM2 $ ESet p) (g l) (g r)
-                   ESend p d          -> (liftM $ ESend p) (g d)
-                   EBinOp p op l r    -> (liftM2 $ EBinOp p op) (g l) (g r)
-                   EUnOp p op v       -> (liftM $ EUnOp p op) (g v)
-                   EFor p v t c b     -> (liftM2 $ EFor p v t) (g c) (g b)
-                   EFork p v t c b    -> (liftM2 $ EFork p v t) (g c) (g b)
-                   EWith p v t c b d  -> (liftM3 $ EWith p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
-                   EAny p v t c b d   -> (liftM3 $ EAny p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
-                   EPHolder p         -> return $ EPHolder p
-                   EAnon p            -> return $ EAnon p
-                   ETyped p v t       -> (liftM $ \v' -> ETyped p v' t) (g v)
-                   ERelPred p rel as  -> (liftM $ ERelPred p rel) $ mapM g as
-                   EPut p rel v       -> (liftM $ EPut p rel) $ g v
-                   EDelete p rel c    -> (liftM $ EDelete p rel) $ g c
+                   EVar p v            -> return $ EVar p v
+                   EPacket p           -> return $ EPacket p
+                   EBuiltin p f as     -> (liftM $ EBuiltin p f) $ mapM g as
+                   EApply p f as       -> (liftM $ EApply p f) $ mapM g as
+                   EField p s f        -> (liftM $ \s' -> EField p s' f) $ g s
+                   ELocation p rl a d  -> (liftM $ \a' -> ELocation p rl a' d) $ g a
+                   EBool p b           -> return $ EBool p b
+                   EInt p i            -> return $ EInt p i
+                   EString p s         -> return $ EString p s
+                   EBit p w v          -> return $ EBit p w v
+                   EStruct p s fs      -> (liftM $ EStruct p s) $ mapM g fs
+                   ETuple p fs         -> (liftM $ ETuple p) $ mapM g fs
+                   ESlice p v h l      -> (liftM $ \v' -> ESlice p v' h l) $ g v
+                   EMatch p m cs       -> (liftM2 $ EMatch p) (g m) $ mapM (\(e1, e2) -> liftM2 (,) (g e1) (g e2)) cs
+                   EVarDecl p v        -> return $ EVarDecl p v
+                   ESeq p l r          -> (liftM2 $ ESeq p) (g l) (g r)
+                   EPar p l r          -> (liftM2 $ ESeq p) (g l) (g r)
+                   EITE p i t me       -> (liftM3 $ EITE p) (g i) (g t) (maybe (return Nothing) (liftM Just . g) me)
+                   EDrop p             -> return $ EDrop p
+                   ESet p l r          -> (liftM2 $ ESet p) (g l) (g r)
+                   ESend p d           -> (liftM $ ESend p) (g d)
+                   EBinOp p op l r     -> (liftM2 $ EBinOp p op) (g l) (g r)
+                   EUnOp p op v        -> (liftM $ EUnOp p op) (g v)
+                   EFor p v t c b      -> (liftM2 $ EFor p v t) (g c) (g b)
+                   EFork p v t c b     -> (liftM2 $ EFork p v t) (g c) (g b)
+                   EWith p v t c b d   -> (liftM3 $ EWith p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
+                   EAny p v t c b d    -> (liftM3 $ EAny p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
+                   EPHolder p          -> return $ EPHolder p
+                   EAnon p             -> return $ EAnon p
+                   ETyped p v t        -> (liftM $ \v' -> ETyped p v' t) (g v)
+                   ERelPred p rel as   -> (liftM $ ERelPred p rel) $ mapM g as
+                   EPut p rel v        -> (liftM $ EPut p rel) $ g v
+                   EDelete p rel c     -> (liftM $ EDelete p rel) $ g c
+                   ELambda p as r l    -> (liftM $ ELambda p as r) $ g l
+                   EApplyLambda p l as -> (liftM2 $ EApplyLambda p) (g l) (mapM g as)
 
 
 exprMap :: (a -> b) -> ExprNode a -> ExprNode b
@@ -192,43 +197,44 @@ exprCollectCtxM :: (Monad m) => (ECtx -> ExprNode b -> m b) -> (b -> b -> b) -> 
 exprCollectCtxM f op ctx e = exprFoldCtxM g ctx e
     where g ctx' x = do x' <- f ctx' x
                         return $ case x of
-                                     EVar _ _          -> x'
-                                     EPacket _         -> x'
-                                     EBuiltin _ _ as   -> foldl' op x' as
-                                     EApply _ _ as     -> foldl' op x' as
-                                     EField _ s _      -> x' `op` s
-                                     ELocation _ _ a _ -> x' `op` a
-                                     EBool _ _         -> x'
-                                     EInt _ _          -> x'
-                                     EString _ _       -> x'
-                                     EBit _ _ _        -> x'
-                                     EStruct _ _ fs    -> foldl' op x' fs
-                                     ETuple _ fs       -> foldl' op x' fs
-                                     ESlice _ v _ _    -> x' `op` v
-                                     EMatch _ m cs     -> foldl' (\a (p,v) -> a `op` p `op` v) (x' `op` m) cs
-                                     EVarDecl _ _      -> x'    
-                                     ESeq _ l r        -> x' `op` l `op` r       
-                                     EPar _ l r        -> x' `op` l `op` r       
-                                     EITE _ i t me     -> let x'' = x' `op` i `op` t in 
-                                                          maybe x'' (x'' `op`) me
-                                     EDrop _           -> x'
-                                     ESet _ l r        -> x' `op` l `op` r
-                                     ESend _ d         -> x' `op` d        
-                                     EBinOp _ _ l r    -> x' `op` l `op` r  
-                                     EUnOp _ _ v       -> x' `op` v
-                                     EFor _ _ _ c b    -> x' `op` c `op` b
-                                     EFork _ _ _ c b   -> x' `op` c `op` b
-                                     EWith _ _ _ c b d -> let x'' = x' `op` c `op` b in
-                                                          maybe x'' (x'' `op`) d
-                                     EAny _ _ _ c b d  -> let x'' = x' `op` c `op` b in
-                                                          maybe x'' (x'' `op`) d
-                                     EPHolder _        -> x'
-                                     EAnon _           -> x'
-                                     ETyped _ v _      -> x' `op` v
-                                     ERelPred _ _ as   -> foldl' op x' as
-                                     EPut _ _ v        -> x' `op` v
-                                     EDelete _ _ c     -> x' `op` c
-
+                                     EVar _ _              -> x'
+                                     EPacket _             -> x'
+                                     EBuiltin _ _ as       -> foldl' op x' as
+                                     EApply _ _ as         -> foldl' op x' as
+                                     EField _ s _          -> x' `op` s
+                                     ELocation _ _ a _     -> x' `op` a
+                                     EBool _ _             -> x'
+                                     EInt _ _              -> x'
+                                     EString _ _           -> x'
+                                     EBit _ _ _            -> x'
+                                     EStruct _ _ fs        -> foldl' op x' fs
+                                     ETuple _ fs           -> foldl' op x' fs
+                                     ESlice _ v _ _        -> x' `op` v
+                                     EMatch _ m cs         -> foldl' (\a (p,v) -> a `op` p `op` v) (x' `op` m) cs
+                                     EVarDecl _ _          -> x'    
+                                     ESeq _ l r            -> x' `op` l `op` r       
+                                     EPar _ l r            -> x' `op` l `op` r       
+                                     EITE _ i t me         -> let x'' = x' `op` i `op` t in 
+                                                              maybe x'' (x'' `op`) me
+                                     EDrop _               -> x'
+                                     ESet _ l r            -> x' `op` l `op` r
+                                     ESend _ d             -> x' `op` d        
+                                     EBinOp _ _ l r        -> x' `op` l `op` r  
+                                     EUnOp _ _ v           -> x' `op` v
+                                     EFor _ _ _ c b        -> x' `op` c `op` b
+                                     EFork _ _ _ c b       -> x' `op` c `op` b
+                                     EWith _ _ _ c b d     -> let x'' = x' `op` c `op` b in
+                                                              maybe x'' (x'' `op`) d
+                                     EAny _ _ _ c b d      -> let x'' = x' `op` c `op` b in
+                                                              maybe x'' (x'' `op`) d
+                                     EPHolder _            -> x'
+                                     EAnon _               -> x'
+                                     ETyped _ v _          -> x' `op` v
+                                     ERelPred _ _ as       -> foldl' op x' as
+                                     EPut _ _ v            -> x' `op` v
+                                     EDelete _ _ c         -> x' `op` c
+                                     ELambda _ _ _ l       -> x' `op` l
+                                     EApplyLambda _ l as   -> foldl' op (x' `op` l) as
 
 exprCollectM :: (Monad m) => (ExprNode b -> m b) -> (b -> b -> b) -> Expr -> m b
 exprCollectM f op e = exprCollectCtxM (\_ e' -> f e') op undefined e
@@ -360,29 +366,41 @@ isLRel r ctx rel = isJust $ find ((== rel) . name) $ fst $ ctxRels r ctx
 -- Inline method bodies
 exprInline :: Refine -> [String] -> ECtx -> Expr -> Expr
 exprInline r skip ctx e = exprFoldCtx (exprInline' r skip) ctx e'
-    where e' = evalState (exprFoldM (exprPrecomputeArgs r) e) 0
+    where e' = evalState (exprFoldCtxM (exprPrecomputeArgs r) ctx e) 0
 
 -- compute arguments ahead of function invocations
-exprPrecomputeArgs :: Refine -> ENode -> State Int Expr
-exprPrecomputeArgs r (EApply _ f as) = do
-    let Function{..} = getFunc r f
-    let simple :: Expr -> Bool
-        simple (E EVar{})         = True
-        simple (E EBool{})        = True
-        simple (E EBit{})         = True
-        simple (E EInt{})         = True
-        simple (E EString{})      = True
-        simple (E (ETyped _ e _)) = simple e
-        simple _                  = False
-    (ps, as') <- liftM unzip
-                 $ mapIdxM (\a i -> if simple a
-                                       then return (Nothing, a)
-                                       else do let t = typ $ funcArgs !! i
-                                               arg <- allocArg
-                                               let vdecl = eSet (eTyped (eVarDecl arg) t) a
-                                               return (Just vdecl, eVar arg)) as
-    return $ exprSequence $ (catMaybes ps) ++ [eApply f as']
-exprPrecomputeArgs _ e = return $ E e
+exprPrecomputeArgs :: Refine -> ECtx -> ENode -> State Int Expr
+exprPrecomputeArgs r ctx e = 
+    case e of
+         EApply _ f as -> do
+             let Function{..} = getFunc r f
+             (ps, as') <- liftM unzip
+                          $ mapIdxM (\a i -> if simple a
+                                                then return (Nothing, a)
+                                                else do let t = typ $ funcArgs !! i
+                                                        arg <- allocArg
+                                                        let vdecl = eSet (eTyped (eVarDecl arg) t) a
+                                                        return (Just vdecl, eVar arg)) as
+             return $ exprSequence $ (catMaybes ps) ++ [eApply f as']
+         EApplyLambda _ l as -> do
+             (ps, as') <- liftM unzip
+                          $ mapIdxM (\a i -> if simple a
+                                                then return (Nothing, a)
+                                                else do let t = exprType r (CtxApplyLambdaArg e ctx i) a
+                                                        arg <- allocArg
+                                                        let vdecl = eSet (eTyped (eVarDecl arg) t) a
+                                                        return (Just vdecl, eVar arg)) as
+             return $ exprSequence $ (catMaybes ps) ++ [eApplyLambda l as']
+         _ -> return $ E e
+    where simple :: Expr -> Bool
+          simple (E EVar{})         = True
+          simple (E EBool{})        = True
+          simple (E EBit{})         = True
+          simple (E EInt{})         = True
+          simple (E EString{})      = True
+          simple (E ELambda{})      = True
+          simple (E (ETyped _ x _)) = simple x
+          simple _                  = False
 
 allocArg :: State Int String
 allocArg = do modify (1+)
@@ -399,6 +417,16 @@ exprInline' r skip ctx e@(EApply _ f as) | elem f skip    = E e
                          Just i  -> as !! i
                          Nothing -> eVar $ f ++ ":" ++ v
           vsubst v = f ++ ":" ++ v
+exprInline' r skip ctx e@(EApplyLambda _ (E e'@(ELambda _ as' _ e'')) as) = exprVarSubst subst vsubst body
+    where body = exprInline r skip (CtxLambda e' (CtxApplyLambda e ctx)) e''
+          -- rename local vars; substitute arguments
+          subst v = case findIndex ((==v) . name) as' of
+                         Just i  -> as !! i
+                         Nothing -> eVar $ "lambda!:" ++ v
+          -- XXX: this renaming leads to conflicts for nested lambdas or two lambdas 
+          -- being in scope at the same time.  Instead, we must generate a unique 
+          -- prefix for each lambda invocation.
+          vsubst v = "lambda!:" ++ v
 exprInline' _ _ _   e                                     = E e
 
 -- every variable must be declared in a separate statement, e.g.,
@@ -462,6 +490,8 @@ expr2Statement' _ _   e EDrop{}                        = return ([], E e)
 expr2Statement' _ _   e EPHolder{}                     = return ([], E e)
 expr2Statement' _ _   e EAnon{}                        = return ([], E e)
 expr2Statement' _ _   e ERelPred{}                     = error $ "Expr.expr2Statement " ++ show e
+expr2Statement' _ _   e ELambda{}                      = error $ "Expr.expr2Statement " ++ show e
+expr2Statement' _ _   e EApplyLambda{}                 = error $ "Expr.expr2Statement " ++ show e
 
 extype r ctx e = exprType r ctx e
 
@@ -591,6 +621,7 @@ ctxMustReturn ctx@CtxWithBody{}   = ctxMustReturn $ ctxParent ctx
 ctxMustReturn ctx@CtxWithDef{}    = ctxMustReturn $ ctxParent ctx
 ctxMustReturn ctx@CtxAnyBody{}    = ctxMustReturn $ ctxParent ctx
 ctxMustReturn ctx@CtxAnyDef{}     = ctxMustReturn $ ctxParent ctx
+ctxMustReturn     CtxLambda{}     = True
 ctxMustReturn _                   = False
 
 exprIsStatement :: ENode -> Bool

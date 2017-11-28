@@ -140,18 +140,22 @@ validateFinal r = do
 
 
 typeValidate :: (MonadError String me) => Refine -> Type -> me ()
-typeValidate _ (TBit p w)     = assert (w>0) p "Integer width must be greater than 0"
-typeValidate r (TStruct _ cs) = do uniqNames (\c -> "Multiple definitions of constructor " ++ c) cs
-                                   mapM_ (consValidate r) cs
-                                   mapM_ (\as -> mapM_ (\(a1, a2) -> assertR r (typ a1 == typ a2) (pos a2) $
-                                                                     "Argument " ++ name a1 ++ " is re-declared with a different types. Previous declaration: " ++ (show $ pos a1)) 
-                                                       $ zip as $ tail as)
-                                           $ sortAndGroup name $ concatMap consArgs cs
-typeValidate r (TTuple _ ts)  = mapM_ (typeValidate r) ts
-typeValidate r (TArray _ t _) = typeValidate r t
-typeValidate r (TUser   p n)  = do _ <- checkType p r n
-                                   return ()
-typeValidate _ _              = return ()
+typeValidate _ (TBit p w)       = assert (w>0) p "Integer width must be greater than 0"
+typeValidate r (TStruct _ cs)   = do uniqNames (\c -> "Multiple definitions of constructor " ++ c) cs
+                                     mapM_ (consValidate r) cs
+                                     mapM_ (\as -> mapM_ (\(a1, a2) -> assertR r (typ a1 == typ a2) (pos a2) $
+                                                                       "Argument " ++ name a1 ++ " is re-declared with a different types. Previous declaration: " ++ (show $ pos a1)) 
+                                                        $ zip as $ tail as)
+                                             $ sortAndGroup name $ concatMap consArgs cs
+typeValidate r (TTuple _ ts)    = mapM_ (typeValidate r) ts
+typeValidate r (TArray _ t _)   = typeValidate r t
+typeValidate r (TUser   p n)    = do _ <- checkType p r n
+                                     return ()
+typeValidate r (TLambda _ as t) = do uniqNames (\a -> "Multiple definitions of argument " ++ a) as
+                                     mapM_ (typeValidate r . typ) as
+                                     typeValidate r t
+                                     return ()
+typeValidate _ _                = return ()
 
 consValidate :: (MonadError String me) => Refine -> Constructor -> me ()
 consValidate r Constructor{..} = do
@@ -533,6 +537,8 @@ exprValidate1 r ctx (EPut p rel _)      = do ctxCheckSideEffects p r ctx
 exprValidate1 r ctx (EDelete p rel _)   = do ctxCheckSideEffects p r ctx
                                              Relation{..} <- checkRelation p r ctx rel
                                              assertR r (relMutable || ctxInCLI ctx) p "Cannot modify immutable relation"
+exprValidate1 _ _   (ELambda _ _ _ _)   = return ()
+exprValidate1 _ _   (EApplyLambda _ _ _)= return ()
 
 checkNoVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me ()
 checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p 
@@ -587,6 +593,11 @@ exprValidate2 r ctx (EVarDecl p x)      = assertR r (isJust $ ctxExpectType r ct
 exprValidate2 r _  (EITE _ _ t e)       = let e' = maybe (tTuple []) id e
                                               cs' = filter ((/= tSink) . typ' r) [e', t] in
                                           mapM_ (\x -> matchType (pos x) r (head cs') x) cs'
+exprValidate2 r _  (EApplyLambda p l as)= do assertR r (length as == length (typeLambdaArgs l)) p "The number of arguments does not match lambda declaration"
+                                             case l of
+                                                  TLambda _ as' r' -> do mapM_ (\(a,a') -> matchType (pos a') r a a') $ zip as as'
+                                                                         return ()
+                                                  _                -> errR r (pos l) "Not a lambda"
 exprValidate2 _ _   _                   = return ()
 
 checkLExpr :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
@@ -620,6 +631,8 @@ ctxCheckSideEffects p r ctx =
          CtxAnyCond _ _    -> complain
          CtxRelPred _ _ _  -> complain
          CtxRefine         -> complain
+         CtxLambda _ _     -> complain
+         CtxApplyLambda _ _-> complain
          _                 -> ctxCheckSideEffects p r (ctxParent ctx)
     where complain = err p $ "Side effects are not allowed in this context " ++ show ctx
 

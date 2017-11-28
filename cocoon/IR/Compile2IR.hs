@@ -85,13 +85,17 @@ compilePort structs workdir r port =
                     $ I.optimize 0 compiled 
     in trace (unsafePerformIO $ do {I.cfgDump (I.plCFG optimized) odotname; return ""}) optimized
 
+
+skipFuncs :: Refine -> [String]
+skipFuncs r = map name $ filter (elem (AnnotController nopos) . funcAnnot) $ refineFuncs r
+
 compilePort' :: (?s::StructReify, ?r::Refine) => SwitchPort -> CompileState ()
 compilePort' SwitchPort{..} = do 
     entrynd <- allocNode
     setEntryNode entrynd
     let f = getFunc ?r portIn
     let key = name $ head $ funcArgs f
-    let skip = map name $ filter (elem (AnnotController nopos) . funcAnnot) $ refineFuncs ?r
+    let skip = skipFuncs ?r
     let inlined = exprInline ?r skip (CtxFunc f CtxRefine) $ fromJust $ funcDef f
     let e = {-trace ("inlined spec:\n\n" ++ show inlined) $-} evalState (expr2Statement ?r (CtxFunc f CtxRefine) inlined) 0
     case exprValidate ?r (CtxFunc f CtxRefine) e of
@@ -118,6 +122,13 @@ compileExprAt :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> I.NodeId -> Ma
 compileExprAt vars ctx entrynd _ (E e@(EApply _ f as)) = do
     let as' = mapIdx (\a i -> mkScalarExpr vars (CtxApply e ctx i) a) as
     updateNode entrynd (I.Par [I.BB [] $ I.Controller f as']) []
+    return vars
+
+-- Generate a fake message to controller for lambda invocation to keep
+-- track of variables used in its arguments.
+compileExprAt vars ctx entrynd _ (E e@(EApplyLambda _ _ as)) = do
+    let as' = mapIdx (\a i -> mkExpr vars (CtxApplyLambdaArg e ctx i) a) as
+    updateNode entrynd (I.Par [I.BB [] $ I.Controller "" $ concat as']) []
     return vars
 
 compileExprAt vars ctx entrynd exitnd (E e@(ESeq _ e1 e2)) = do
@@ -244,24 +255,28 @@ compileExprAt vars _   entrynd exitnd (E EAnon{})    = ignore vars entrynd exitn
 compileExprAt _    _   _       _      e              = error $ "Compile2IR: compileExprAt " ++ show e
 
 -- Compile boolean expression and determine its dependencies without changing compilation state
-exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> String -> Expr -> I.Pipeline -> ([I.VarName], I.Pipeline)
-exprDeps vars ctx rel relvar e pl = (deps, pl''')
-    where (entry, pl') = runState (exprDeps' vars ctx e) pl
-          -- isolate subgraph that computes e only
-          cfg' = G.nfilter (\nd -> elem nd $ G.dfs [entry] (I.plCFG pl')) $ I.plCFG pl'
-          -- optimize to eliminate unused variables
-          pl'' = I.optimize (-1000) $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
-          -- substitute variable names with column names
-          cols = relCols rel
-          relvs = map fst $ var2Scalars relvar (relRecordType rel)
-          pl''' = foldl' (\pl_ (v,c) -> I.plSubstVar v c pl_) pl'' (zip relvs cols)
-          -- all variables occurring in the expression
-          evars = nub $ concatMap nodeVars $ map snd $ G.labNodes $ I.plCFG pl'''
-          -- variables 
-          deps = evars `intersect` (M.keys $ I.plVars pl)
-          -- new variables declared in the expression
-          --evars' = I.plVars pl'' M.\\ I.plVars pl
-
+exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> String -> Expr -> I.Pipeline -> ([I.VarName], Expr -> I.Pipeline)
+exprDeps vars ctx rel relvar e pl = (deps, fpl)
+    where 
+    fpl = \rec -> let e' = exprVarSubst (\vname -> if vname == relvar && rec /= eTuple [] then rec else eVar vname) id e
+                      -- inline substituted lambda expressions
+                      e'' = exprInline ?r (skipFuncs ?r) ctx e'
+                      e''' = evalState (expr2Statement ?r ctx e'') 0 
+                      (entry, pl') = runState (exprDeps' vars ctx e''') pl
+                      -- isolate subgraph that computes e only
+                      cfg' = G.nfilter (\nd -> elem nd $ G.dfs [entry] (I.plCFG pl')) $ I.plCFG pl'
+                      -- optimize to eliminate unused variables
+                      pl'' = I.optimize (-1000) $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
+                      -- substitute variable names with column names
+                      cols = relCols rel
+                      relvs = map fst $ var2Scalars relvar (relRecordType rel)
+                  in foldl' (\pl_ (v,c) -> I.plSubstVar v c pl_) pl'' (zip relvs cols)
+    -- all variables occurring in the expression
+    evars = nub $ concatMap nodeVars $ map snd $ G.labNodes $ I.plCFG $ fpl $ eTuple []
+    -- variables 
+    deps = evars `intersect` (M.keys $ I.plVars pl)
+    -- new variables declared in the expression
+    --evars' = I.plVars pl'' M.\\ I.plVars pl
 
 exprDeps' :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Expr -> CompileState I.NodeId
 exprDeps' vars ctx e = do
