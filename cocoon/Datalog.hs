@@ -54,7 +54,7 @@ refine2DL r =
                              _           -> False) 
                   $ typeSort r $ nub $ concatMap (relTypes r) rels
         dlrels = zip rels $ map rel2DL rels
-    in (structs, funcs', dlrels)
+    in ((SMT.Struct "__lambda" [SMT.Constructor "__Lambda" [SMT.Var "__lambda_string" SMT.TString]]): structs, funcs', dlrels)
 
 rel2DL :: (?r::Refine) => Relation -> ((DL.Relation, [DL.Rule]), [ [(DL.Relation, [DL.Rule])] ])
 rel2DL rel = ((rel', rules), constrs)

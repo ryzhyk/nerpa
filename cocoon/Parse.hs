@@ -19,7 +19,8 @@ limitations under the License.
 
 module Parse ( cocoonGrammar
              , cmdGrammar
-             , cfgGrammar) where
+             , cfgGrammar
+             , lambdaGrammar) where
 
 import Control.Applicative hiding (many,optional,Const)
 import Control.Monad
@@ -34,7 +35,7 @@ import Numeric
 import Syntax
 import Pos
 import Util
-import Builtins
+import {-# SOURCE #-}Builtins
 import Name
 
 reservedOpNames = [":", "?", "!", "|", "&", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#", "@", "\\"]
@@ -48,6 +49,7 @@ reservedNames = ["_",
                  "default",
                  "drop",
                  "else",
+                 "eval",
                  "false",
                  "foreign",
                  "for",
@@ -153,6 +155,7 @@ data SpecItem = SpType         TypeDef
 cocoonGrammar = removeTabs *> ((optional whiteSpace) *> spec <* eof)
 cmdGrammar = removeTabs *> ((optional whiteSpace) *> cmd <* eof)
 cfgGrammar = removeTabs *> ((optional whiteSpace) *> (many relation) <* eof)
+lambdaGrammar = removeTabs *> ((optional whiteSpace) *> elambda <* eof) 
 
 cmd =  (Left  <$ reservedOp ":" <*> many1 identifier)
    <|> (Right <$> expr)
@@ -309,7 +312,7 @@ tupleType  = (\fs -> case fs of
                           [f] -> f
                           _   -> TTuple nopos fs)
              <$> (parens $ commaSep typeSpecSimple)
-lambdaType = TLambda nopos <$  (reserved "function")
+lambdaType = TLambda nopos <$  (reservedOp "\\")
                            <*> (parens $ commaSep arg) 
                            <*> (colon *> typeSpecSimple)
 

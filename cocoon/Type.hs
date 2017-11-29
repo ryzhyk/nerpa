@@ -210,19 +210,22 @@ matchType p r x y = assertR r (matchType' r x y) p $ "Incompatible types " ++ sh
 matchType' :: (WithType a, WithType b) => Refine -> a -> b -> Bool
 matchType' r x y = 
     case (t1, t2) of
-         (TLocation _   , TLocation _)    -> True
-         (TBool _       , TBool _)        -> True
-         (TBit _ w1     , TBit _ w2)      -> w1==w2
-         (TInt _        , TInt _)         -> True
-         (TString _     , TString _)      -> True
-         (TSink _       , TSink _)        -> True
-         (TArray _ a1 l1, TArray _ a2 l2) -> matchType' r a1 a2 && l1 == l2
-         (TStruct _ cs1 , TStruct _ cs2)  -> (length cs1 == length cs2) &&
-                                             (all (\(c1, c2) -> consName c1 == consName c2) $ zip cs1 cs2)
-         (TTuple _ fs1  , TTuple _ fs2)   -> (length fs1 == length fs2) &&
-                                             (all (\(f1, f2) -> matchType' r f1 f2) $ zip fs1 fs2)
-         (TUser _ u1    , TUser _ u2)     -> u1 == u2
-         _                                -> False
+         (TLocation _      , TLocation _)      -> True
+         (TBool _          , TBool _)          -> True
+         (TBit _ w1        , TBit _ w2)        -> w1==w2
+         (TInt _           , TInt _)           -> True
+         (TString _        , TString _)        -> True
+         (TSink _          , TSink _)          -> True
+         (TArray _ a1 l1   , TArray _ a2 l2)   -> matchType' r a1 a2 && l1 == l2
+         (TStruct _ cs1    , TStruct _ cs2)    -> (length cs1 == length cs2) &&
+                                                  (all (\(c1, c2) -> consName c1 == consName c2) $ zip cs1 cs2)
+         (TTuple _ fs1     , TTuple _ fs2)     -> (length fs1 == length fs2) &&
+                                                  (all (\(f1, f2) -> matchType' r f1 f2) $ zip fs1 fs2)
+         (TUser _ u1       , TUser _ u2)       -> u1 == u2
+         (TLambda _ as1 r1 , TLambda _ as2 r2) -> (length as1 == length as2) &&
+                                                  (all (\(a1, a2) -> matchType' r a1 a2) $ zip as1 as2) &&
+                                                  (matchType' r r1 r2)
+         _                                     -> False
     where t1 = typ' r x
           t2 = typ' r y
 

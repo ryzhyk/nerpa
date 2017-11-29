@@ -209,7 +209,7 @@ ctxMVars r ctx =
          CtxPut _ _               -> ([], plvars ++ prvars)
          CtxDelete _ _            -> ([], plvars ++ prvars)
          CtxLambda e _            -> ([], map f2mf $ exprLambdaArgs e)
-         CtxApplyLambda _ _       -> ([], [])
+         CtxApplyLambda _ _       -> ([], plvars ++ prvars)
          CtxApplyLambdaArg _ _ _  -> ([], plvars ++ prvars)
     where (plvars, prvars) = ctxMVars r $ ctxParent ctx 
           frkvar e = (exprFrkVar e, Just $ relRecordType $ getRelation r $ exprTable e)

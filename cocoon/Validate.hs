@@ -595,9 +595,9 @@ exprValidate2 r _  (EITE _ _ t e)       = let e' = maybe (tTuple []) id e
                                           mapM_ (\x -> matchType (pos x) r (head cs') x) cs'
 exprValidate2 r _  (EApplyLambda p l as)= do assertR r (length as == length (typeLambdaArgs l)) p "The number of arguments does not match lambda declaration"
                                              case l of
-                                                  TLambda _ as' r' -> do mapM_ (\(a,a') -> matchType (pos a') r a a') $ zip as as'
-                                                                         return ()
-                                                  _                -> errR r (pos l) "Not a lambda"
+                                                  TLambda _ as' _ -> do mapM_ (\(a,a') -> matchType (pos a') r a a') $ zip as as'
+                                                                        return ()
+                                                  _               -> errR r (pos l) "Not a lambda"
 exprValidate2 _ _   _                   = return ()
 
 checkLExpr :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
