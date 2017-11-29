@@ -1,5 +1,6 @@
 include(`tables.ccn')
 include(`views.ccn')
+undefine(`eval')
 
 switch SChassis[Chassis]
 
@@ -201,7 +202,7 @@ procedure acl(lport : LogicalSwitchPort) : (bool, bool) = {
     } else if (pkt.ct.rpl and (pkt.ct.commit.label[0:0] == 1)) {
         (false, false)
     } else {
-        the (acl in ACL | eval(acl.match_cond) and acl.lswitch == lport.lswitch and acl.direction == ACLFrom) {
+        the (acl in ACL | eval(acl.match_cond)(pkt) and acl.lswitch == lport.lswitch and acl.direction == ACLFrom) {
             match (acl.action) {
                 ACLAllow        -> (true, true),
                 ACLAllowRelated -> 

@@ -434,7 +434,7 @@ typedef acl_action_t = ACLAllow
 table ACL ( lswitch    : lswitch_id_t
           , priority   : bit<16>
           , direction  : acl_dir_t
-          , match_cond : string
+          , match_cond : \(p: Packet): bool
           , action     : acl_action_t
           , foreign key (lswitch) references LogicalSwitch(id))
 
