@@ -16,7 +16,7 @@ limitations under the License.
 
 {-# LANGUAGE OverloadedStrings, RecordWildCards, FlexibleContexts, LambdaCase, ScopedTypeVariables #-}
 
-module OpenFlow.OVS (ovsBackend) where
+module OpenFlow.OVS (newOVSBackend) where
 
 import Text.PrettyPrint
 import qualified Data.Map as M
@@ -27,6 +27,7 @@ import System.Exit
 import Control.Monad
 import Control.Monad.Except
 import Data.List
+import Data.IORef
 
 import OpenFlow.OVSConst
 import OpenFlow.OVSProtocol
@@ -42,37 +43,42 @@ import qualified IR.IR             as IR
 import qualified Datalog.Datalog   as DL
 import qualified Datalog           as DL
 
-ovsBackend :: Backend OF.IRSwitches
-ovsBackend = Backend { backendStructs      = ovsStructReify
-                     , backendValidate     = error "backendValidate not implemented"
-                     , backendPrecompile   = ovsPrecompile
-                     , backendStart        = ovsStart
-                     , backendBuildSwitch  = ovsBuildSwitch
-                     , backendUpdateSwitch = ovsUpdateSwitch
-                     , backendResetSwitch  = ovsResetSwitch
-                     , backendStop         = ovsStop
-                     }
+newOVSBackend :: IO (Backend OF.IRSwitches)
+newOVSBackend = do 
+    ref <- newIORef M.empty
+    return Backend { backendStructs      = ovsStructReify
+                   , backendValidate     = error "backendValidate not implemented"
+                   , backendPrecompile   = ovsPrecompile
+                   , backendStart        = ovsStart
+                   , backendBuildSwitch  = ovsBuildSwitch   ref
+                   , backendUpdateSwitch = ovsUpdateSwitch  ref
+                   , backendResetSwitch  = ovsResetSwitch
+                   , backendStop         = ovsStop
+                   }
 
 ovsPrecompile :: (MonadError String me) => FilePath -> Refine -> me OF.IRSwitches
 ovsPrecompile workdir r = OF.precompile ovsStructReify workdir r ovsRegFile
 
-ovsBuildSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> OF.IRSwitches -> IR.DB -> IO ()
-ovsBuildSwitch workdir r sw f@(DL.Fact rname _) ir db = do
+ovsBuildSwitch :: IORef OF.RuntimeState -> FilePath -> Refine -> Switch -> DL.Fact -> OF.IRSwitches -> IR.DB -> IO ()
+ovsBuildSwitch ref workdir r sw f@(DL.Fact rname _) ir db = do
+    s <- readIORef ref
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        cmds = OF.buildSwitch r ovsStructReify (ir M.! name sw) db swid
+        (cmds, s') = OF.buildSwitch r ovsStructReify s (ir M.! name sw) db swid
     ovsResetSwitch workdir r sw f
     sendCmds workdir rname swid swaddr swname cmds
+    writeIORef ref s'
 
-
-ovsUpdateSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> OF.IRSwitches -> IR.Delta -> IO ()
-ovsUpdateSwitch workdir r sw f@(DL.Fact rname _) ir delta = do
+ovsUpdateSwitch :: IORef OF.RuntimeState -> FilePath -> Refine -> Switch -> DL.Fact -> OF.IRSwitches -> IR.Delta -> IO ()
+ovsUpdateSwitch ref workdir r sw f@(DL.Fact rname _) ir delta = do
+    s <- readIORef ref
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        cmds = OF.updateSwitch r ovsStructReify (ir M.! name sw) swid delta
+        (cmds, s') = OF.updateSwitch r ovsStructReify s (ir M.! name sw) swid delta
     when (not $ null cmds) $ sendCmds workdir rname swid swaddr swname cmds
+    writeIORef ref s'
 
 ovsResetSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> IO ()
 ovsResetSwitch _ r _ f = do

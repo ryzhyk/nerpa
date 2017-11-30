@@ -110,7 +110,7 @@ compilePort' SwitchPort{..} = do
     let (cdeps, cpl) = exprDeps vars (CtxFunc f CtxRefine) rel (vnameAt key entrynd) c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxFunc f CtxRefine) Nothing e
-    updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
+    updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) I.First) [entryndb]
 
 compileExpr :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
 compileExpr vars ctx exitnd e = do
@@ -201,8 +201,8 @@ compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t c b md)) = do
     case md of
          Just d -> do
              (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
-             updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd)) [entryndb, entryndd]
-         Nothing -> updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
+             updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd) I.First) [entryndb, entryndd]
+         Nothing -> updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) I.First) [entryndb]
     return vars
 
 compileExprAt vars _   entrynd exitnd (E (ETyped _ (E (EVarDecl _ v)) t)) = do
@@ -255,7 +255,7 @@ compileExprAt vars _   entrynd exitnd (E EAnon{})    = ignore vars entrynd exitn
 compileExprAt _    _   _       _      e              = error $ "Compile2IR: compileExprAt " ++ show e
 
 -- Compile boolean expression and determine its dependencies without changing compilation state
-exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> String -> Expr -> I.Pipeline -> ([I.VarName], Expr -> I.Pipeline)
+exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> String -> Expr -> I.Pipeline -> ([I.VarName], I.FPipeline)
 exprDeps vars ctx rel relvar e pl = (deps, fpl)
     where 
     fpl = \rec -> let e' = exprVarSubst (\vname -> if vname == relvar && rec /= eTuple [] then rec else eVar vname) id e
@@ -270,9 +270,12 @@ exprDeps vars ctx rel relvar e pl = (deps, fpl)
                       -- substitute variable names with column names
                       cols = relCols rel
                       relvs = map fst $ var2Scalars relvar (relRecordType rel)
-                  in foldl' (\pl_ (v,c) -> I.plSubstVar v c pl_) pl'' (zip relvs cols)
+                      pl''' = foldl' (\pl_ (v,c) -> I.plSubstVar v c pl_) pl'' (zip relvs cols)
+                      -- columns occurring in the expression
+                      ecols = nub $ concatMap I.nodeCols $ map snd $ G.labNodes $ I.plCFG pl'''
+                  in (ecols, pl''')
     -- all variables occurring in the expression
-    evars = nub $ concatMap nodeVars $ map snd $ G.labNodes $ I.plCFG $ fpl $ eTuple []
+    evars = nub $ concatMap nodeVars $ map snd $ G.labNodes $ I.plCFG $ snd $ fpl $ eTuple []
     -- variables 
     deps = evars `intersect` (M.keys $ I.plVars pl)
     -- new variables declared in the expression

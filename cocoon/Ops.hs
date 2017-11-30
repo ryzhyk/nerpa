@@ -39,7 +39,7 @@ data BOp = Eq
          | BAnd
          | BOr
          | Concat
-         deriving (Eq)
+         deriving (Eq, Ord)
 
 instance PP BOp where
     pp Eq     = "=="
@@ -67,7 +67,7 @@ instance Show BOp where
     show = render . pp
 
 data UOp = Not
-           deriving (Eq)
+           deriving (Eq, Ord)
 
 instance PP UOp where
     pp Not = "not"

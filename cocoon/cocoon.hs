@@ -160,7 +160,7 @@ main = do
              writeFile cargofile $ render cargo
              putStrLn $ "Datalog program written to file " ++ rsfile
          ActionController -> do 
-             let backend@Backend{..} = OF.ovsBackend
+             backend@Backend{..} <- OF.newOVSBackend
              combined <- readValidateAddDelta fname workdir
              putStrLn "Compiling"
              ir <- case backendPrecompile workdir combined of

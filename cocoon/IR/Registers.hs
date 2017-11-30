@@ -188,16 +188,16 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
         rename' e = e
     let g :: NodeId -> Node -> Node
         g _  node = case node of
-                         Fork t vs fpl' b       -> Fork t (vars2fnames vs) (\rec -> 
-                                                                            let pl' = fpl' rec
-                                                                                cfg = plCFG pl' in
-                                                                            pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg}) b
-                         Lookup t vs fpl' th el -> Lookup t (vars2fnames vs) (\rec ->   
-                                                                               let pl' = fpl' rec
+                         Fork t vs fpl' b         -> Fork t (vars2fnames vs) (\rec -> 
+                                                                              let (cs, pl') = fpl' rec
+                                                                                  cfg = plCFG pl' in
+                                                                              (cs, pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg})) b
+                         Lookup t vs fpl' th el s -> Lookup t (vars2fnames vs) (\rec ->   
+                                                                               let (cs, pl') = fpl' rec
                                                                                    cfg = plCFG pl' in
-                                                                               pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg}) th el
-                         Cond cs               -> Cond $ map (mapFst rename) cs
-                         Par bs                -> Par bs
+                                                                               (cs, pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg})) th el s
+                         Cond cs                  -> Cond $ map (mapFst rename) cs
+                         Par bs                   -> Par bs
         f :: CFG -> CFGCtx -> Maybe Action
         f cfg ctx = case ctxAction cfg ctx of
                          ASet    l r   -> Just $ ASet (rename l) (rename r)

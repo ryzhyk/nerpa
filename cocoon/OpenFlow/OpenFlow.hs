@@ -90,10 +90,12 @@ data Flow = Flow { flowPriority :: Prio
                  }
 
 data GroupType = GroupAll
+               | GroupSelect
                | GroupIndirect
 
 instance PP GroupType where
     pp GroupAll      = "all"
+    pp GroupSelect   = "select"
     pp GroupIndirect = "indirect"
 
 instance Show GroupType where
