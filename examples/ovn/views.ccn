@@ -73,3 +73,13 @@ LPortLBVIPIP(lport, proto, vip, ip) :- LogicalSwitchPort(lport, lswitch, _, _, _
                                        LoadBalancer(lb,_,proto),
                                        LBSwitch(lb, lswitch),
                                        LBIP(lb, vip, ip)
+
+
+// Logical switch port addressing
+view LPortMACIP ( lswitch : lswitch_id_t
+                , lport   : lport_id_t
+                , mac     : mac_addr_t
+                , ip      : ip_addr_t)
+
+LPortMACIP(lswitch, lport, mac, ip) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, en, _, _), en == true, LogicalSwitchPortIP(lport, mac, ip)
+LPortMACIP(lswitch, lport, mac, ip) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, en, _, _), en == true, LogicalSwitchPortDynAddr(_, lport, mac, ip) 

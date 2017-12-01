@@ -20,23 +20,26 @@ procedure vSwitchIngress(port: VSwitchPort): sink = {
         } default { drop }
     };
    
-    lportIngress(lport, pkt)
+    lportIngress(lport)
 }
 
 
 // XXX: TODO: QoS marking
-procedure lportIngress(lport: LogicalSwitchPort, p: Packet): sink = {
+procedure lportIngress(lport: LogicalSwitchPort): sink = {
     if (not portSecurityAllowed(lport, pkt)) drop;
-    // Run through connection tracker if needed
+    /* Run through connection tracker if needed */
     connTrack(lport);
-    // acl
+    /* acl */
     (var allowed, var commit) = acl(lport);
     if (not allowed) drop;
-    // load balancing
+    /* load balancing */
     lb(lport, commit);
+    var arpresp = arp(lport);
+    if (arpresp) {
+        lportEgress(lport)
+    };
 
 /*
-    arp();
     dhcp();
     dns();
     if (multicast/broadcast) {
@@ -96,7 +99,7 @@ function portSecIP(lport: LogicalSwitchPort, p: Packet): bool = {
     if (isPktDHCPDiscovery(p) or isPktDAD(p)) {
         true
     } else {
-        the (psecip in LogicalSwitchPortIP | psecip.lport == lport.id and psecip.mac == p.src and ipSrcMatch(p.payload, psecip.ip)) {
+        the (psecip in PortSecurityIP | psecip.lport == lport.id and psecip.mac == p.src and ipSrcMatch(p.payload, psecip.subnet)) {
             portSecNDP(lport, p)
         } default { false }
     }
@@ -258,6 +261,88 @@ procedure lb(lport : LogicalSwitchPort, commit : bool) : () = {
         } else if commit {
             pkt.ct.commit = CTCommit { 0, 0, CTNATNone}
         } 
+    }
+}
+
+/* Ingress Table 10: ARP/ND responder
+
+       This  table implements ARP/ND responder in a logical switch for known IPs. The advantage of the ARP responder flow is to limit ARP broadcasts by locally responding to ARP requests without the need to send to other hypervisors. One common case is when the inport is a logical port associated with a VIF and the broadcast is responded to on the local hypervisor rather than broadcast across the whole network and responded to by the destination VM. This behavior is proxy ARP.
+
+    · Priority-100 flows to skip the ARP responder if inport is of type localnet or vtep and advances directly to the next table. ARP requests sent  to  localnet  or  vtep ports  can  be  received  by  multiple  hypervisors. Now, because the same mac binding rules are downloaded to all hypervisors, each of the multiple hypervisors will respond. This will confuse L2 learning on the source of the ARP requests. ARP requests received on an inport of type router are  not  expected  to  hit  any  logical switch  ARP  responder flows. However, no skip flows are installed for these packets, as there would be some additional flow cost for this and the value appears limited.
+
+    · Priority-50 flows that match ARP requests to each known IP address A of every logical switch port, and respond with ARP replies directly with corresponding  Ethernet address E:
+
+     eth.dst = eth.src;
+     eth.src = E;
+     arp.op = 2; // ARP reply. 
+     arp.tha = arp.sha;
+     arp.sha = E;
+     arp.tpa = arp.spa;
+     arp.spa = A;
+     outport = inport;
+     flags.loopback = 1;
+     output;
+
+     These flows are omitted for logical ports (other than router ports or localport ports) that are down.
+
+    · Priority-50  flows  that  match  IPv6 ND neighbor solicitations to each known IP address A (and A’s solicited node address) of every logical switch port, and respond with neighbor advertisements directly with corresponding Ethernet address E:
+
+     nd_na {
+         eth.src = E;
+         ip6.src = A;
+         nd.target = A;
+         nd.tll = E;
+         outport = inport;
+         flags.loopback = 1;
+         output;
+     };
+
+     These flows are omitted for logical ports (other than router ports or localport ports) that are down.
+
+    · Priority-100 flows with match criteria like the ARP and ND flows above, except that they only match packets from the inport that owns the IP addresses  in  question, with action next;. These flows prevent OVN from replying to, for example, an ARP request emitted by a VM for its own IP address. A VM only makes this kind of request to attempt to detect a duplicate IP address assignment, so sending a reply will prevent the VM from accepting the IP address that it owns.
+
+    In place of next;, it would be reasonable to use drop; for the flows’ actions. If everything is working as it is  configured,  then  this  would  produce  equivalent results,  since no host should reply to the request. But ARPing for one’s own IP address is intended to detect situations where the network is not working as configured, so dropping the request would frustrate that intent.
+
+    · One priority-0 fallback flow that matches all packets and advances to the next table.
+*/
+/* Returns true if this is an ARP request packet that has been modified to generate an ARP
+   response.  The caller must send this response back to the sender.  */
+procedure arp(lport : LogicalSwitchPort) : bool = {
+    match (lport.ptype) {
+        LPortLocalnet{_} -> false,
+        _                -> {
+            match (pkt.payload) {
+                EthARP{ARPPkt{ARPRequest, spa, tpa, sha, tha}} -> {
+                    // ignore requests for sender's own IP
+                    the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr4{tpa} and lpaddr.lport != lport.id) {
+                        pkt.dst = pkt.src;
+                        pkt.src = lpaddr.mac;
+                        pkt.payload.arp.op = ARPReply;
+                        pkt.payload.arp.tha = sha;
+                        pkt.payload.arp.sha = lpaddr.mac;
+                        pkt.payload.arp.spa = tpa;
+                        // XXX: what does this compile to?
+                        // flags.loopback = 1;
+                        true
+                    } default {
+                        false
+                    }
+                },
+                EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{target, sll}}}}}} -> {
+                    the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr6{target} and lpaddr.lport != lport.id) {
+                        pkt.dst = pkt.src;
+                        pkt.src = lpaddr.mac;
+                        pkt.payload.ip6.src = target;
+                        pkt.payload.ip6.payload.icmp6.payload = ICMP6NA{ICMP6NAPkt{target, lpaddr.mac}};
+                        // XXX: what does this compile to?
+                        // flags.loopback = 1;
+                        true
+                    } default {
+                        false
+                    }
+                }
+            }
+        }
     }
 }
 

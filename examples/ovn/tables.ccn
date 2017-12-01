@@ -86,17 +86,12 @@ table LogicalSwitch( id           : lswitch_id_t
           XXX: is "unknown" mutually exclusive with other address types?
 
           Ethernet address followed by zero or more IPv4 or IPv6 addresses (or both)
-                 An  Ethernet address defined is owned by the logical port.  Like a physical Ethernet NIC, a logical port ordinarily has a single fixed Ethernet
-                 address.
+                 An  Ethernet address defined is owned by the logical port.  Like a physical Ethernet NIC, a logical port ordinarily has a single fixed Ethernet address.
 
-                 When a OVN logical switch processes a unicast Ethernet frame whose destination MAC address is in a logical port’s addresses column, it delivers
-                 it only to that port, as if a MAC learning process had learned that MAC address on the port.
-
+                 When a OVN logical switch processes a unicast Ethernet frame whose destination MAC address is in a logical port’s addresses column, it delivers it only to that port, as if a MAC learning process had learned that MAC address on the port.  
                  If IPv4 or IPv6 address(es) (or both) are defined, it indicates that the logical port owns the given IP addresses.
 
-                 If  IPv4  address(es)  are defined, the OVN logical switch uses this information to synthesize responses to ARP requests without traversing the
-                 physical network. The OVN logical router connected to the logical switch, if any, uses this information to avoid issuing ARP requests for logi‐
-                 cal switch ports.
+                 If  IPv4  address(es)  are defined, the OVN logical switch uses this information to synthesize responses to ARP requests without traversing the physical network. The OVN logical router connected to the logical switch, if any, uses this information to avoid issuing ARP requests for logical switch ports.
 
                  Note that the order here is important. The Ethernet address must be listed before the IP address(es) if defined.
 
@@ -116,14 +111,10 @@ table LogicalSwitch( id           : lswitch_id_t
 
           XXX: should we learn the address dynamically?
           unknown
-                 This  indicates  that the logical port has an unknown set of Ethernet addresses.  When an OVN logical switch processes a unicast Ethernet frame
-                 whose destination MAC address is not in any logical port’s addresses column, it delivers it to the port  (or  ports)  whose  addresses  columns
-                 include unknown.
+                 This  indicates  that the logical port has an unknown set of Ethernet addresses.  When an OVN logical switch processes a unicast Ethernet frame whose destination MAC address is not in any logical port’s addresses column, it delivers it to the port  (or  ports)  whose  addresses  columns include unknown.
 
           dynamic
-                 Use this keyword to make ovn-northd generate a globally unique MAC address and choose an unused IPv4 address with the logical port’s subnet and
-                 store them in the port’s dynamic_addresses column.  ovn-northd will use the  subnet  specified  in  other_config:subnet  in  the  port’s  Logi‐
-                 cal_Switch.
+                 Use this keyword to make ovn-northd generate a globally unique MAC address and choose an unused IPv4 address with the logical port’s subnet and store them in the port’s dynamic_addresses column.  ovn-northd will use the  subnet  specified  in  other_config:subnet  in  the  port’s  Logical_Switch.
 */
 
 table LogicalSwitchPortMAC ( lport : lport_id_t
@@ -133,7 +124,7 @@ table LogicalSwitchPortMAC ( lport : lport_id_t
 
 table LogicalSwitchPortIP( lport : lport_id_t
                          , mac   : mac_addr_t
-                         , ip    : ip_subnet_t
+                         , ip    : ip_addr_t
                          , unique (mac, ip)
                          , foreign key (mac) references LogicalSwitchPortMAC(mac)
                          , foreign key (lport) references LogicalSwitchPort(id))
