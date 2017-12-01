@@ -23,16 +23,19 @@ procedure vSwitchIngress(port: VSwitchPort): sink = {
     lportIngress(lport, pkt)
 }
 
+
+// XXX: TODO: QoS marking
 procedure lportIngress(lport: LogicalSwitchPort, p: Packet): sink = {
     if (not portSecurityAllowed(lport, pkt)) drop;
     // Run through connection tracker if needed
     connTrack(lport);
-
+    // acl
     (var allowed, var commit) = acl(lport);
     if (not allowed) drop;
+    // load balancing
+    lb(lport, commit);
+
 /*
-    // QoS marking??
-    lb(commit);
     arp();
     dhcp();
     dns();
@@ -169,7 +172,7 @@ procedure connTrack(lport : LogicalSwitchPort): () = {
         needCT = true
     } default { () };
 
-    the (lbvip in LPortLBVIP | lbvip.lport == lport.id and lbvip.vip == pkt.payload.ip4.dst) {
+    the (lbvip in LPortLBVIP | lbvip.lport == lport.id and lbvip.vip.addr == pkt.payload.ip4.dst) {
         needCT = true
     } default { () };
 
@@ -227,6 +230,34 @@ procedure acl(lport : LogicalSwitchPort) : (bool, bool) = {
                 (true, false)
             }
         }
+    }
+}
+
+/* Ingress Table 8: LB
+    It  contains a priority-0 flow that simply moves traffic to the next table. For established connections a priority 100 flow matches on ct.est && !ct.rel && !ct.new && !ct.inv and sets an action reg0[2] = 1; next; to act as a hint for table Stateful to send packets through connection tracker to NAT the packets. (The packet will automatically get DNATed to the same IP address as the first packet in that connection.)
+
+    Ingress Table 9: Stateful
+    · For all the configured load balancing rules for a switch in OVN_Northbound database that includes a L4 port PORT of protocol P and IPv4 address VIP, a priority-120 flow that matches on ct.new && ip && ip4.dst == VIP && P && P.dst == PORT with an action of ct_lb(args), where args contains comma separated IPv4 addresses (and optional port numbers) to load balance to.
+    · For all the configured load balancing rules for a switch in OVN_Northbound database that includes just an IP address VIP to match on, a priority-110 flow that matches on ct.new && ip && ip4.dst == VIP with an action of ct_lb(args), where  args  contains  comma  separated  IPv4 addresses.
+    · A priority-100 flow commits packets to connection tracker using ct_commit; next; action based on a hint provided by the previous tables (with a match for reg0[1] == 1).
+    · A priority-100 flow sends the packets to connection tracker using ct_lb; as the action based on a hint provided by the previous tables (with a match for reg0[2] == 1).
+    · A priority-0 flow that simply moves traffic to the next table.
+ */
+procedure lb(lport : LogicalSwitchPort, commit : bool) : () = {
+    any (lb in LPortLBVIPIP | pkt.ct.new and 
+                              lb.lport == lport.id and 
+                              lb.proto == pkt.payload.ip4.proto and 
+                              lb.vip.addr == pkt.payload.ip4.dst and 
+                              ( (lb.proto == 6 and lb.vip.prt == pkt.payload.ip4.payload.tcp.dst) or
+                                (lb.proto == 17 and lb.vip.prt == pkt.payload.ip4.payload.udp.dst) or
+                                (lb.vip.prt == 0))) {
+        pkt.ct.commit = CTCommit { 0, 0, CTNATDNAT{IPAddr4{lb.ip.addr}, lb.ip.prt, CTHash} }
+    } default {
+        if (pkt.ct.est and (not pkt.ct.rel) and (not pkt.ct.new) and (not pkt.ct.inv)) {
+            pkt.ct.commit = CTCommit { 0, 0, CTNATDefault}
+        } else if commit {
+            pkt.ct.commit = CTCommit { 0, 0, CTNATNone}
+        } 
     }
 }
 

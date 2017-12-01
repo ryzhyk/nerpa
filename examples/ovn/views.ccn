@@ -60,6 +60,16 @@ LPortStatefulACL(lport) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, _, _, _
 
 // Load balancing
 view LPortLBVIP( lport : lport_id_t
-               , vip   : ip4_addr_t)
+               , vip   : ip4_addr_port_t)
 
-LPortLBVIP(lport, vip) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, _, _, _), LBSwitch(lb, lswitch), LBVIP(lb, IP4AddrPort{vip, _})
+LPortLBVIP(lport, vip) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, _, _, _), LBSwitch(lb, lswitch), LBVIP(lb, vip)
+
+view LPortLBVIPIP( lport : lport_id_t
+                 , proto : ip_proto_t
+                 , vip   : ip4_addr_port_t
+                 , ip    : ip4_addr_port_t)
+
+LPortLBVIPIP(lport, proto, vip, ip) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, _, _, _), 
+                                       LoadBalancer(lb,_,proto),
+                                       LBSwitch(lb, lswitch),
+                                       LBIP(lb, vip, ip)

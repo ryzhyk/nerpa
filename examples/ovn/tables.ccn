@@ -332,15 +332,12 @@ Load_Balancer TABLE
               See External IDs at the beginning of this document.
 */
 
-typedef lb_proto_t = LBTCP
-                   | LBUDP
-
 typedef lb_id_t = bit<64>
 
 // XXX: Does LB belong to a unique switch? Does it apply to packets leaving VMs connected to the switch?
 table LoadBalancer ( id      : lb_id_t
                    , name    : string
-                   , proto   : lb_proto_t
+                   , proto   : ip_proto_t
                    , primary key (id) )
 
 table LBSwitch ( lb      : lb_id_t
@@ -349,19 +346,21 @@ table LBSwitch ( lb      : lb_id_t
                , foreign key (lswitch) references LogicalSwitch(id) )
 
 
-typedef ip4_addr_port = IP4AddrPort { addr : ip4_addr_t
-                                    , prt  : bit<16> // 0 means no port
-                                    }
+typedef ip4_addr_port_t = IP4AddrPort { addr : ip4_addr_t
+                                      , prt  : bit<16> // 0 means no port
+                                      }
+
+typedef lbvip_id_t = bit<16>
 
 table LBVIP ( lb  : lb_id_t
-            , vip : ip4_addr_port
+            , vip : ip4_addr_port_t
             , primary key (lb, vip)
             , foreign key (lb) references LoadBalancer(id) )
 
-table LBIP ( lb  : lb_id_t
-           , vip : ip4_addr_port
-           , ip  : ip4_addr_port
-           , foreign key (lb,vip) references LBVIP(lb,vip) )
+table LBIP ( lb : lb_id_t
+           , vip : ip4_addr_port_t
+           , ip  : ip4_addr_port_t
+           , foreign key (lb, vip) references LBVIP(lb,vip))
 
 /*
 ACL TABLE
