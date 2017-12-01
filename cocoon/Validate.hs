@@ -367,7 +367,7 @@ portValidateFinal :: (MonadError String me) => Refine -> SwitchPort -> me ()
 portValidateFinal r port@SwitchPort{..} = do
     let infunc = getFunc r portIn
     let def = fromJust $ funcDef infunc
-    assert (exprIsDeterministic r def) (pos def) "Cannot synthesize non-deterministic behavior"
+    --assert (exprIsDeterministic r def) (pos def) "Cannot synthesize non-deterministic behavior"
     mapM_ (\dp@(DirPort p dir) -> do 
              assertR r (dir == DirOut) portPos $ "Input port " ++ portName ++ " sends to another input port " ++ show dp
              assertR r (portSwitchRel r (getPort r p) == portSwitchRel r port) portPos 
