@@ -9,7 +9,7 @@ port PVSwitchPort[VSwitchPort](source vSwitchIngress, sink)
 procedure vSwitchIngress(port: VSwitchPort): sink = {
     var lport : LogicalSwitchPort;
     if (pkt.vlan.vid == 0) {
-        the (p in LogicalSwitchPort | p.id == port.id and p.enabled) {
+        the (p in LogicalSwitchPort | p.id == port.lport and p.enabled) {
             lport = p
         } default { drop }
     } else {
@@ -42,16 +42,15 @@ procedure lportIngress(vport: VSwitchPort, lport: LogicalSwitchPort): sink = {
     var arpresp = arp(lport);
     if (arpresp) { bounce(vport, lport) };
 
-    /* DHCP */
+    /* DHCP/DNS */
     match (pkt.payload) {
-        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}} -> if (src == 68 and dst == 67)   { dhcp4(vport, lport) } else { () },
-        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}}       -> if (src == 546 and dst == 547) { dhcp6(vport, lport) } else { () },
+        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}} -> if (src == 68 and dst == 67)   { dhcp4(lport.id) } else { () },
+        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}}       -> if (src == 546 and dst == 547) { dhcp6(lport.id) } else { () },
+        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}} -> if (dst == 53) { dns(lport.id) } else { () },
+        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}}       -> if (dst == 53) { dns(lport.id) } else { () },
         _   -> ()
     };
-    // TODO: DHCPv6
-
 /*
-    dns();
     if (multicast/broadcast) {
     } else {
     }
@@ -385,8 +384,10 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
      where  E  is  the server MAC address and S is the server IPv4 address defined in the DHCPv4 options and A is the IPv4 address defined in the logical port’s addresses column.
                      (This terminates ingress packet processing; the packet does not go to the next ingress table.)
 */
-procedure dhcp4(vport : VSwitchPort, lport : LogicalSwitchPort) : sink = {
-    the (dhcp_addr_opts in LPortDHCP4AddrOpts | dhcp_addr_opts.lport == lport.id) {
+
+#controller
+procedure dhcp4(lport : lport_id_t) : sink = {
+    the (dhcp_addr_opts in LPortDHCP4AddrOpts | dhcp_addr_opts.lport == lport) {
         pkt.dst = pkt.src;
         pkt.src = dhcp_addr_opts.options.server_mac;
         pkt.payload.ip4.dst = dhcp_addr_opts.ip;
@@ -397,13 +398,13 @@ procedure dhcp4(vport : VSwitchPort, lport : LogicalSwitchPort) : sink = {
                                                                  pkt.payload.ip4.payload.udp.payload.dhcp4.flags,
                                                                  0, dhcp_addr_opts.ip, dhcp_addr_opts.options.server_id, 0, 
                                                                  pkt.dst ++ 80'h0, dhcp_addr_opts.options} };
-        bounce(vport, lport)
+        ctlBounce(lport)
     } default { drop }
 }
 
-
-procedure dhcp6(vport : VSwitchPort, lport : LogicalSwitchPort) : sink = {
-    the (dhcp_addr_opts in LPortDHCP6AddrOpts | dhcp_addr_opts.lport == lport.id) {
+#controller
+procedure dhcp6(lport : lport_id_t) : sink = {
+    the (dhcp_addr_opts in LPortDHCP6AddrOpts | dhcp_addr_opts.lport == lport) {
         pkt.dst = pkt.src;
         pkt.src = dhcp_addr_opts.options.server_id.mac;
         pkt.payload.ip6.dst = dhcp_addr_opts.ip;
@@ -415,10 +416,17 @@ procedure dhcp6(vport : VSwitchPort, lport : LogicalSwitchPort) : sink = {
              (pkt.payload.ip4.payload.udp.payload.dhcp6.op == 4/*CONFIRM*/) or 
              (pkt.payload.ip4.payload.udp.payload.dhcp6.op == 5/*RENEW*/) ) {
             pkt.payload.ip4.payload.udp.payload = UDPDHCP6{DHCP6Pkt{7/*REPLY*/, dhcp_addr_opts.options} };
-            bounce(vport, lport)
+            ctlBounce(lport)
         } else { drop }
     } default { drop }
 }
+
+#controller
+procedure dns(lport : lport_id_t) : sink = {
+    // TODO: call DNS lookup builting
+    drop
+}
+
 
 // bounce the  packet back to the port is arrived from after local ARP or DHCP processing
 procedure bounce(vport: VSwitchPort, lport : LogicalSwitchPort): sink = {
@@ -427,6 +435,18 @@ procedure bounce(vport: VSwitchPort, lport : LogicalSwitchPort): sink = {
         _                        -> ()
     };
     send PVSwitchPort[vport].out
+}
+
+
+procedure ctlBounce(lport : lport_id_t): sink = {
+    the (lp in LogicalSwitchPort | lp.id == lport) {
+        var vp: VSwitchPort;
+        vp = match (lp.ptype) {
+                LPortVIF{p,_,_} -> the (v in VSwitchPort | vp.lport == p)     { v },
+                _               -> the (v in VSwitchPort | vp.lport == lport) { v }
+        };
+        bounce(vp, lp)
+    } default { drop }
 }
 
 procedure lportEgress(port: LogicalSwitchPort): sink = drop 

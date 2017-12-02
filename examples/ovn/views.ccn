@@ -3,7 +3,7 @@ view VIFPort( id : lport_id_t )
 VIFPort(id) :- LogicalSwitchPort(id,_,LPortVIF{_,_,_},_,_,_,_,_,_)
 
 // Non-VIF ports
-view VSwitchPort( id            : lport_id_t
+view VSwitchPort( lport         : lport_id_t
                 , lswitch       : lswitch_id_t
                 , ptype         : lport_type_t
                 , name          : string
@@ -12,7 +12,7 @@ view VSwitchPort( id            : lport_id_t
                 , enabled       : bool
                 , dhcp4_options : opt_dhcp4_options_id_t
                 , dhcp6_options : opt_dhcp6_options_id_t
-                , primary key (id)
+                , primary key (lport)
                 , foreign key (switch) references Chassis(id)
                 , unique (switch, portnum) )
 
