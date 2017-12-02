@@ -492,7 +492,7 @@ exprValidate1 _ _   (EString _ _)       = return ()
 exprValidate1 _ _   (EBit _ _ _)        = return ()
 exprValidate1 r _   (EStruct p c as)    = do cons <- checkConstructor p r c
                                              assertR r (length as == length (consArgs cons)) p
-                                                     "Number of arguments does not match constructor declaration"
+                                                     $ "Number of arguments does not match constructor declaration: " ++ show cons
 exprValidate1 _ _   (ETuple _ _)        = return ()
 exprValidate1 _ _   (ESlice _ _ _ _)    = return ()
 exprValidate1 _ _   (EMatch _ _ _)      = return ()
