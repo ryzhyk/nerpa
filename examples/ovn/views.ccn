@@ -82,4 +82,14 @@ view LPortMACIP ( lswitch : lswitch_id_t
                 , ip      : ip_addr_t)
 
 LPortMACIP(lswitch, lport, mac, ip) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, en, _, _), en == true, LogicalSwitchPortIP(lport, mac, ip)
-LPortMACIP(lswitch, lport, mac, ip) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, en, _, _), en == true, LogicalSwitchPortDynAddr(_, lport, mac, ip) 
+LPortMACIP(lswitch, lport, mac, ip) :- LogicalSwitchPort(lport, lswitch, _, _, _, _, en, _, _), en == true, LogicalSwitchPortDynAddr(_, lport, mac, ip)
+
+// DHCP 
+view LPortDHCP4AddrOpts ( lport   : lport_id_t
+                        , mac     : mac_addr_t
+                        , ip      : ip_addr_t
+                        , options : dhcp4_options_t)
+
+LPortDHCP4AddrOpts(lport, mac, ip, options) :- LPortMACIP(_, lport, mac, ip), 
+                                               LogicalSwitchPort(lport,_, _, _, _, _, en, SomeDHCP4Options{optid}, _), 
+                                               DHCPv4Options(optid, options)

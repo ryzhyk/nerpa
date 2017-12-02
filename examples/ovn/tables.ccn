@@ -806,13 +806,6 @@ table NAT ( lrouter     : lrouter_id_t
               Example: "ovn.org".
 */
 
-// XXX: encode remaining DHCP options, some of them require support for arrays
-typedef dhcp4_options_t = DHCP4Options { cidr       : ip4_subnet_t
-                                       , server_id  : ip4_addr_t
-                                       , server_mac : mac_addr_t
-                                       , router     : ip4_addr_t
-                                       , lease_time : bit<32> }
-
 typedef duid_t = DUID_LLT  { hw_type : bit<16>
                            , time    : bit<32>
                            , mac     : mac_addr_t
