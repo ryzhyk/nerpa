@@ -44,7 +44,8 @@ procedure lportIngress(vport: VSwitchPort, lport: LogicalSwitchPort): sink = {
 
     /* DHCP */
     match (pkt.payload) {
-        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}} -> if (src == 68 and dst == 67) { dhcp4(vport, lport) } else { () },
+        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}} -> if (src == 68 and dst == 67)   { dhcp4(vport, lport) } else { () },
+        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}}       -> if (src == 546 and dst == 547) { dhcp6(vport, lport) } else { () },
         _   -> ()
     };
     // TODO: DHCPv6
@@ -388,16 +389,35 @@ procedure dhcp4(vport : VSwitchPort, lport : LogicalSwitchPort) : sink = {
     the (dhcp_addr_opts in LPortDHCP4AddrOpts | dhcp_addr_opts.lport == lport.id) {
         pkt.dst = pkt.src;
         pkt.src = dhcp_addr_opts.options.server_mac;
-        pkt.payload.ip4.dst = dhcp_addr_opts.ip.addr4;
+        pkt.payload.ip4.dst = dhcp_addr_opts.ip;
         pkt.payload.ip4.src = dhcp_addr_opts.options.server_id;
         pkt.payload.ip4.payload.udp.src = 67;
         pkt.payload.ip4.payload.udp.dst = 68;
         pkt.payload.ip4.payload.udp.payload = UDPDHCP4{DHCP4Pkt{ 2, 1, 6, pkt.payload.ip4.payload.udp.payload.dhcp4.xid, 0, 
                                                                  pkt.payload.ip4.payload.udp.payload.dhcp4.flags,
-                                                                 0, dhcp_addr_opts.ip.addr4, dhcp_addr_opts.options.server_id, 0, 
+                                                                 0, dhcp_addr_opts.ip, dhcp_addr_opts.options.server_id, 0, 
                                                                  pkt.dst ++ 80'h0, dhcp_addr_opts.options} };
         bounce(vport, lport)
-    }
+    } default { drop }
+}
+
+
+procedure dhcp6(vport : VSwitchPort, lport : LogicalSwitchPort) : sink = {
+    the (dhcp_addr_opts in LPortDHCP6AddrOpts | dhcp_addr_opts.lport == lport.id) {
+        pkt.dst = pkt.src;
+        pkt.src = dhcp_addr_opts.options.server_id.mac;
+        pkt.payload.ip6.dst = dhcp_addr_opts.ip;
+        pkt.payload.ip6.src = dhcp_addr_opts.server_ip;
+        pkt.payload.ip4.payload.udp.src = 547;
+        pkt.payload.ip4.payload.udp.dst = 546;
+        if ( (pkt.payload.ip4.payload.udp.payload.dhcp6.op == 1/*SOLICIT*/) or 
+             (pkt.payload.ip4.payload.udp.payload.dhcp6.op == 3/*REQUEST*/) or 
+             (pkt.payload.ip4.payload.udp.payload.dhcp6.op == 4/*CONFIRM*/) or 
+             (pkt.payload.ip4.payload.udp.payload.dhcp6.op == 5/*RENEW*/) ) {
+            pkt.payload.ip4.payload.udp.payload = UDPDHCP6{DHCP6Pkt{7/*REPLY*/, dhcp_addr_opts.options} };
+            bounce(vport, lport)
+        } else { drop }
+    } default { drop }
 }
 
 // bounce the  packet back to the port is arrived from after local ARP or DHCP processing

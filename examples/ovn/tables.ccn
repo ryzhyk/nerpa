@@ -806,22 +806,6 @@ table NAT ( lrouter     : lrouter_id_t
               Example: "ovn.org".
 */
 
-typedef duid_t = DUID_LLT  { hw_type : bit<16>
-                           , time    : bit<32>
-                           , mac     : mac_addr_t
-                           }
-               | DUID_EN   { iana_num : bit<32>
-                           , id       : bit<128> // upper bound?
-                           }
-               | DUID_LL   { hw_type : bit<16>
-                           , mac     : mac_addr_t
-                           }
-               | DUID_UUID { uuid : bit<128> }
-
-typedef dhcp6_options_t = DHCP6Options { cidr       : ip4_subnet_t
-                                       , server_id  : duid_t}
-
-
 typedef dhcp4_options_id_t = bit<64>
 
 table DHCPv4Options ( id      : dhcp4_options_id_t
@@ -830,8 +814,9 @@ table DHCPv4Options ( id      : dhcp4_options_id_t
 
 typedef dhcp6_options_id_t = bit<64>
 
-table DHCPv6Options ( id      : dhcp6_options_id_t
-                    , options : dhcp6_options_t
+table DHCPv6Options ( id        : dhcp6_options_id_t
+                    , server_ip : ip6_addr_t
+                    , options   : dhcp6_options_t
                     , primary key (id))
 
 typedef pnet_id_t = bit<64>

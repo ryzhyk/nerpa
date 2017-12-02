@@ -87,9 +87,19 @@ LPortMACIP(lswitch, lport, mac, ip) :- LogicalSwitchPort(lport, lswitch, _, _, _
 // DHCP 
 view LPortDHCP4AddrOpts ( lport   : lport_id_t
                         , mac     : mac_addr_t
-                        , ip      : ip_addr_t
+                        , ip      : ip4_addr_t
                         , options : dhcp4_options_t)
 
-LPortDHCP4AddrOpts(lport, mac, ip, options) :- LPortMACIP(_, lport, mac, ip), 
+LPortDHCP4AddrOpts(lport, mac, ip, options) :- LPortMACIP(_, lport, mac, IPAddr4{ip}), 
                                                LogicalSwitchPort(lport,_, _, _, _, _, en, SomeDHCP4Options{optid}, _), 
                                                DHCPv4Options(optid, options)
+
+view LPortDHCP6AddrOpts ( lport     : lport_id_t
+                        , mac       : mac_addr_t
+                        , ip        : ip6_addr_t
+                        , server_ip : ip6_addr_t
+                        , options   : dhcp6_options_t)
+
+LPortDHCP6AddrOpts(lport, mac, ip, server_ip, options) :- LPortMACIP(_, lport, mac, IPAddr6{ip}), 
+                                                          LogicalSwitchPort(lport,_, _, _, _, _, en, _, SomeDHCP6Options{optid}), 
+                                                          DHCPv6Options(optid, server_ip, options)
