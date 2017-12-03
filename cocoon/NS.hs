@@ -197,7 +197,7 @@ ctxMVars r ctx =
          CtxForCond e _           -> ([], (frkvar e) : (plvars ++ prvars))
          CtxForBody e _           -> ((frkvar e) : plvars, prvars)
          CtxForkCond e _          -> ([], (frkvar e) : (plvars ++ prvars))
-         CtxForkBody e _          -> ([frkvar e], (plvars ++ prvars))
+         CtxForkBody e _          -> ((frkvar e):plvars, prvars)
          CtxWithCond e _          -> ([], (frkvar e) : (plvars ++ prvars))
          CtxWithBody e _          -> ((frkvar e) : plvars, prvars)
          CtxWithDef _ _           -> (plvars, prvars)
