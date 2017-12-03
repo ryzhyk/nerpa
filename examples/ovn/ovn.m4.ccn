@@ -46,16 +46,15 @@ procedure lportIngress(vport: VSwitchPort, lport: LogicalSwitchPort): sink = {
     match (pkt.payload) {
         EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}} -> if (src == 68 and dst == 67)   { dhcp4(lport.id) } else { () },
         EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}}       -> if (src == 546 and dst == 547) { dhcp6(lport.id) } else { () },
-        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}} -> if (dst == 53) { dns(lport.id) } else { () },
-        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}}       -> if (dst == 53) { dns(lport.id) } else { () },
         _   -> ()
     };
-/*
-    if (multicast/broadcast) {
-    } else {
-    }
-*/
-    drop
+
+    if pktIsDNSReq(pkt) {
+        dns(lport.id)
+    };
+
+    /* destination lookup */
+    dstLookup(vport, lport)
 }
 
 function portSecurityAllowed(lport: LogicalSwitchPort, p: Packet): bool = {
@@ -447,6 +446,47 @@ procedure ctlBounce(lport : lport_id_t): sink = {
         };
         bounce(vp, lp)
     } default { drop }
+}
+
+/* Ingress Table 15 Destination Lookup
+    This table implements switching behavior. It contains these logical flows:
+    · A  priority-100  flow  that  outputs all packets with an Ethernet broadcast or multicast eth.dst to the MC_FLOOD multicast group, which ovn-northd populates with all enabled logical ports.
+    · One priority-50 flow that matches each known Ethernet address against eth.dst and outputs the packet to the single associated output port.
+    For the Ethernet address on a logical switch port of type router, when that logical switch port’s addresses column is set to router and the connected logical  router port specifies a redirect-chassis:
+        · The flow for the connected logical router port’s Ethernet address is only programmed on the redirect-chassis.  
+        · If  the  logical  router  has  rules specified in nat with external_mac, then those addresses are also used to populate the switch’s destination lookup on the chassis where logical_port is resident.
+    · One priority-0 fallback flow that matches all packets and outputs them to the MC_UNKNOWN multicast group, which ovn-northd populates with all enabled  logical  ports that  accept  unknown destination packets. As a small optimization, if no logical ports accept unknown destination packets, ovn-northd omits this multicast group and logical flow.
+*/
+// TODO: optimize tail calls to sendToChassis
+procedure dstLookup(vport : VSwitchPort, lport : LogicalSwitchPort): sink = {
+    /* Compute chassis to forward the packet to */
+    if (ethMulticastAddr(pkt.dst)) {
+        /* fork to all chassis that host this switch */
+        fork (chassis in LSwitchAtChassis | chassis.lswitch == lport.lswitch) {
+            sendToChassis(lport, chassis.chassis)
+        }
+    } else {
+        /* find matching chassis */
+        the (chassis in MACChassis | chassis.lswitch == lport.lswitch and chassis.mac == pkt.dst) {
+            match (chassis.chassis) {
+                DSTLocal      -> sendToChassis(lport, vport.switch),
+                DSTChassis{c} -> sendToChassis(lport, c)
+            }
+        } default {
+            /* destination unknown: send to all chassis that host ports with unknown addresses */
+            fork (chassis in UnknownMACChassis | chassis.lswitch == lport.lswitch) {
+                match (chassis.chassis) {
+                    DSTLocal      -> sendToChassis(lport, vport.switch),
+                    DSTChassis{c} -> sendToChassis(lport, c)
+                }
+            }
+        }
+    }
+}
+
+// Send packet to specified chassis.  
+procedure sendToChassis(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
+    drop
 }
 
 procedure lportEgress(port: LogicalSwitchPort): sink = drop 

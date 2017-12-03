@@ -38,7 +38,7 @@ typedef lswitch_type_t = LSwitchRegular
               Required.  The chassis on which the l2gateway logical port should be bound to. ovn-controller running on the defined chassis will connect this logical
               port to the physical network.
  */
-typedef lport_type_t = LPortVM
+typedef lport_type_t = LPortVM { vmchassis : chassis_id_t }
                      | LPortVIF { parent      : lport_id_t
                                 , tag_request : vlan_id_t
                                 , tag         : vlan_id_t }
@@ -76,7 +76,6 @@ typedef lswitch_id_t = bit<64>
 table LogicalSwitch( id           : lswitch_id_t
                    , stype        : lswitch_type_t
                    , name         : string
-                   , unknown_addr : bool // true if packets with unknown destination should be sent to this port
                    , subnet       : opt_subnet_t
                    , primary key (id))
 
@@ -191,22 +190,32 @@ table LogicalSwitchPort( id            : lport_id_t
                        , lswitch       : lswitch_id_t
                        , ptype         : lport_type_t
                        , name          : string
-                       , switch        : chassis_id_t
-                       , portnum       : bit<16>
                        , enabled       : bool
                        , dhcp4_options : opt_dhcp4_options_id_t
                        , dhcp6_options : opt_dhcp6_options_id_t
+                       , unknown_addr  : bool // true if packets with unknown destination should be sent to this port
                        , primary key (id)
-                       , unique (switch, portnum)
                        , foreign key (lswitch) references LogicalSwitch(id)
-                       , foreign key (switch) references Chassis(id)
                        , foreign key (ptype.rport) references LogicalRouterPort(id) 
                        , foreign key (ptype.localnet) references PhysicalNetwork(id) 
                        , foreign key (ptype.pnet) references PhysicalNetwork(id) 
+                       , foreign key (ptype.vmchassis) references Chassis(id) 
                        , foreign key (ptype.chassis) references Chassis(id) 
                        , foreign key (dhcp4_options.options) references DHCPv4Options(id) 
                        , foreign key (dhcp6_options.options) references DHCPv6Options(id) )
 
+typedef vsport_id_t = bit<64>
+
+// one for each VM, L2Gateway port + 1 for each localnet port/chassis combination
+table VSwitchPort( id            : vsport_id_t
+                 , lport         : lport_id_t
+                 , name          : string
+                 , switch        : chassis_id_t
+                 , portnum       : bit<16>
+                 , primary key (id)
+                 , foreign key (lport) references LogicalSwitchPort(id)
+                 , foreign key (switch) references Chassis(id)
+                 , unique (switch, portnum) )
 
 /*
    port_security: set of strings

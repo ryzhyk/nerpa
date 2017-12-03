@@ -446,7 +446,7 @@ mkExpr p     (EStruct c as)       = (pp $ name s) <> "::" <> pp c <> "{"  <>
     where s = getConsStruct ?q c
           args = consArgs $ getConstructor ?q c
 mkExpr p     (ETuple as)       = "(" <> (commaSep $ map (mkExpr p) as) <> ")"
-mkExpr _     EIsInstance{}        = error "not implemented: Dataflog.mkExpr EIsInstance"
+mkExpr _   e@EIsInstance{}        = error $ "not implemented: Dataflog.mkExpr EIsInstance: " ++ show e
 mkExpr p     (EBinOp op e1 e2)    = 
     case op of
          Eq     -> f "=="
