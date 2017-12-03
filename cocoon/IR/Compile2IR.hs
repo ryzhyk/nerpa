@@ -137,7 +137,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(ESeq _ e1 e2)) = do
     _ <- compileExprAt vars' (CtxSeq2 e ctx) entrynd2 exitnd e2
     return vars
 
-compileExprAt vars ctx entrynd Nothing (E e@(EPar _ e1 e2)) = do
+compileExprAt vars ctx entrynd _ (E e@(EPar _ e1 e2)) = do
     (entrynd1, _) <- compileExpr vars (CtxPar1 e ctx) Nothing e1
     (entrynd2, _) <- compileExpr vars (CtxPar2 e ctx) Nothing e2
     updateNode entrynd (I.Par [I.BB [] $ I.Goto entrynd1, I.BB [] $ I.Goto entrynd2]) [entrynd1, entrynd2]
@@ -159,6 +159,13 @@ compileExprAt vars _   entrynd _      (E (EDrop _)) = do
 
 compileExprAt vars _   entrynd exitnd (E (ESet _ (E EPHolder{}) _)) = ignore vars entrynd exitnd
 
+compileExprAt vars ctx entrynd exitnd (E e@(ESet _ e1 (E e2@(EApplyLambda _ _ as)))) = do
+    let e1' = mkExpr vars (CtxSetL e ctx) e1
+        es  = concat $ mapIdx (\a i -> mkExpr vars (CtxApplyLambdaArg e2 (CtxSetR e ctx) i) a) as
+    let asns = map (\ie -> I.ASet ie $ I.ELambda es (I.exprType ie)) e1'
+    updateNode entrynd (I.Par [I.BB asns $ maybe I.Drop I.Goto exitnd]) $ maybeToList exitnd
+    return vars
+
 compileExprAt vars ctx entrynd exitnd (E e@(ESet _ e1 e2)) = do
     let e1' = mkExpr vars (CtxSetL e ctx) e1
         e2' = mkExpr vars (CtxSetR e ctx) e2
@@ -166,12 +173,12 @@ compileExprAt vars ctx entrynd exitnd (E e@(ESet _ e1 e2)) = do
     updateNode entrynd (I.Par [I.BB asns $ maybe I.Drop I.Goto exitnd]) $ maybeToList exitnd
     return vars
 
-compileExprAt vars ctx entrynd Nothing (E e@(ESend _ (E el@(ELocation _ _ x _)))) = do
+compileExprAt vars ctx entrynd _ (E e@(ESend _ (E el@(ELocation _ _ x _)))) = do
     let port = mkScalarExpr vars (CtxLocation el (CtxSend e ctx)) $ eField x "portnum"
     updateNode entrynd (I.Par [I.BB [] $ I.Send port]) []
     return vars
 
-compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t c b)) = do
+compileExprAt vars ctx entrynd _ (E e@(EFork _ v t c b)) = do
     -- Transform the fork statement to drop packets that do not match
     -- the fork condition right after fork.  This is necessary, since
     -- our OpenFlow backend will fork a packet on every row of the table.
@@ -189,21 +196,8 @@ compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t c b)) = do
     updateNode entrynd (I.Fork t cdeps' cpl $ I.BB asns $ I.Goto entryndb) [entryndb]
     return vars
 
-compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t c b md)) = do
-    let rel = getRelation ?r t
-        cols = relCols rel
-    plvars <- gets (M.keys . I.plVars)
-    (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
-    pl <- get
-    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) rel (vnameAt v entrynd) c pl
-        cdeps' = cdeps `intersect` plvars
-    (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
-    case md of
-         Just d -> do
-             (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
-             updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd) I.First) [entryndb, entryndd]
-         Nothing -> updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) I.First) [entryndb]
-    return vars
+compileExprAt vars ctx entrynd exitnd e@(E EWith{}) = compileQuery vars ctx entrynd exitnd e
+compileExprAt vars ctx entrynd exitnd e@(E EAny{})  = compileQuery vars ctx entrynd exitnd e
 
 compileExprAt vars _   entrynd exitnd (E (ETyped _ (E (EVarDecl _ v)) t)) = do
     (vars', _) <- declVar vars v t entrynd
@@ -254,6 +248,33 @@ compileExprAt vars _   entrynd exitnd (E EPHolder{}) = ignore vars entrynd exitn
 compileExprAt vars _   entrynd exitnd (E EAnon{})    = ignore vars entrynd exitnd
 compileExprAt _    _   _       _      e              = error $ "Compile2IR: compileExprAt " ++ show e
 
+-- Helper for compiling EWith and EAny
+compileQuery :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> I.NodeId -> Maybe I.NodeId -> Expr -> CompileState VMap
+compileQuery vars ctx entrynd exitnd (E e) = do
+    let v  = exprFrkVar e
+        t  = exprTable e
+        c  = exprCond e
+        b  = exprWithBody e
+        md = exprDef e
+    let rel = getRelation ?r t
+        cols = relCols rel
+    plvars <- gets (M.keys . I.plVars)
+    (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
+    pl <- get
+    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) rel (vnameAt v entrynd) c pl
+        cdeps' = cdeps `intersect` plvars
+    (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
+    let sel = case e of
+                   EWith{} -> I.First
+                   EAny{}  -> I.Rand
+                   _       -> error $ "Compile2IR.compileQuery e=" ++ show e
+    case md of
+         Just d -> do
+             (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
+             updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd) sel) [entryndb, entryndd]
+         Nothing -> updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) sel) [entryndb]
+    return vars
+
 -- Compile boolean expression and determine its dependencies without changing compilation state
 exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> String -> Expr -> I.Pipeline -> ([I.VarName], I.FPipeline)
 exprDeps vars ctx rel relvar e pl = (deps, fpl)
@@ -282,7 +303,7 @@ exprDeps vars ctx rel relvar e pl = (deps, fpl)
     --evars' = I.plVars pl'' M.\\ I.plVars pl
 
 exprDeps' :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Expr -> CompileState I.NodeId
-exprDeps' vars ctx e = do
+exprDeps' vars ctx e = {-trace ("exprDeps' " ++ show e) $ -} do
     -- make sure I.optimize keep variables that effect the result of e
     -- by inserting a fake drop depending on the value of e. 
     -- Note: IR2OF.hs relies on this behavior
@@ -425,6 +446,7 @@ fields pref t f =
          -- TODO: add a validation check that dataplane code does not
          -- manipulate strings.
          TString _    -> ETLeaf $ f (I.TBit 8192) pref
+         TLambda{}    -> ETNode []
          t'           -> error $ "Compile2IR.fields " ++ show t'
 
 

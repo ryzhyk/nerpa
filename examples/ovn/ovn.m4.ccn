@@ -460,25 +460,29 @@ procedure ctlBounce(lport : lport_id_t): sink = {
 // TODO: optimize tail calls to sendToChassis
 procedure dstLookup(vport : VSwitchPort, lport : LogicalSwitchPort): sink = {
     /* Compute chassis to forward the packet to */
+    var dst : chassis_id_t;
     if (ethMulticastAddr(pkt.dst)) {
         /* fork to all chassis that host this switch */
         fork (chassis in LSwitchAtChassis | chassis.lswitch == lport.lswitch) {
-            sendToChassis(lport, chassis.chassis)
+            dst = chassis.chassis;
+            sendToChassis(lport, dst)
         }
     } else {
         /* find matching chassis */
         the (chassis in MACChassis | chassis.lswitch == lport.lswitch and chassis.mac == pkt.dst) {
-            match (chassis.chassis) {
-                DSTLocal      -> sendToChassis(lport, vport.switch),
-                DSTChassis{c} -> sendToChassis(lport, c)
-            }
+            dst = match (chassis.chassis) {
+                        DSTLocal      -> vport.switch,
+                        DSTChassis{c} -> c
+            };
+            sendToChassis(lport, dst)            
         } default {
             /* destination unknown: send to all chassis that host ports with unknown addresses */
             fork (chassis in UnknownMACChassis | chassis.lswitch == lport.lswitch) {
-                match (chassis.chassis) {
-                    DSTLocal      -> sendToChassis(lport, vport.switch),
-                    DSTChassis{c} -> sendToChassis(lport, c)
-                }
+                dst = match (chassis.chassis) {
+                            DSTLocal      -> vport.switch,
+                            DSTChassis{c} -> c
+                };
+                sendToChassis(lport, dst)            
             }
         }
     }

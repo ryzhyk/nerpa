@@ -75,6 +75,7 @@ data Expr = EPktField {exprFieldName :: FieldName, exprT :: Type}
           | EBit      {exprWidth :: Int, exprIntVal :: Integer}
           | EBinOp    {exprBOp :: BOp, exprArg1 :: Expr, exprArg2 :: Expr}
           | EUnOp     {exprUOp :: UOp, exprArg :: Expr}
+          | ELambda   {exprArgs :: [Expr], exprLambdaType :: Type}
           deriving (Eq, Ord)
 
 instance PP Expr where
@@ -87,6 +88,7 @@ instance PP Expr where
     pp (EBit w v)        = pp w <> "'d" <> pp v
     pp (EBinOp op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp op e)      = parens $ pp op <+> pp e
+    pp (ELambda as t)    = parens $ "\\" <> parens (hcat $ punctuate comma $ map pp as)  <+> ":" <+> pp t
 
 instance Show Expr where
     show = render . pp
@@ -117,6 +119,7 @@ exprType (EBinOp op e1 e2) = case op of
                              BOr        -> exprType e1
                              Concat     -> TBit $ (typeWidth $ exprType e1) + (typeWidth $ exprType e2)
 exprType (EUnOp Not _)     = TBool
+exprType (ELambda _ t)     = t
 
 exprIsBool :: Expr -> Bool
 exprIsBool e = exprType e == TBool
@@ -130,6 +133,7 @@ exprMap f e@EBool{}           = f e
 exprMap f e@EBit{}            = f e
 exprMap f   (EBinOp op e1 e2) = f $ EBinOp op (exprMap f e1) (exprMap f e2)
 exprMap f   (EUnOp op e)      = f $ EUnOp op $ exprMap f e
+exprMap f   (ELambda as t)    = f $ ELambda (map (exprMap f) as) t
 
 exprVars :: Expr -> [VarName]
 exprVars e = nub $ exprVars' e
@@ -142,6 +146,7 @@ exprVars' (EBool _)         = []
 exprVars' (EBit _ _)        = []
 exprVars' (EBinOp _ e1 e2)  = exprVars' e1 ++ exprVars' e2
 exprVars' (EUnOp _ e)       = exprVars' e
+exprVars' (ELambda as _)    = concatMap exprVars' as
 
 
 exprCols :: Expr -> [VarName]
@@ -155,6 +160,7 @@ exprCols' (EBool _)         = []
 exprCols' (EBit _ _)        = []
 exprCols' (EBinOp _ e1 e2)  = exprCols' e1 ++ exprCols' e2
 exprCols' (EUnOp _ e)       = exprCols' e
+exprCols' (ELambda as _)    = concatMap exprCols' as
 
 exprAtoms :: Expr -> [Expr]
 exprAtoms e = nub $ exprAtoms' e
@@ -167,6 +173,7 @@ exprAtoms'   EBool{}          = []
 exprAtoms'   EBit{}           = []
 exprAtoms'   (EBinOp _ e1 e2) = exprAtoms' e1 ++ exprAtoms' e2
 exprAtoms'   (EUnOp _ e)      = exprAtoms' e
+exprAtoms'   (ELambda as _)   = concatMap exprAtoms' as
 
 exprSubstVar :: VarName -> Expr -> Expr -> Expr
 exprSubstVar v e' e = exprMap (\case 

@@ -490,8 +490,10 @@ expr2Statement' _ _   e EDrop{}                        = return ([], E e)
 expr2Statement' _ _   e EPHolder{}                     = return ([], E e)
 expr2Statement' _ _   e EAnon{}                        = return ([], E e)
 expr2Statement' _ _   e ERelPred{}                     = error $ "Expr.expr2Statement " ++ show e
-expr2Statement' _ _   e ELambda{}                      = error $ "Expr.expr2Statement " ++ show e
-expr2Statement' _ _   e EApplyLambda{}                 = error $ "Expr.expr2Statement " ++ show e
+expr2Statement' _ _   e ELambda{}                      = return ([], E e)
+expr2Statement' r ctx e (EApplyLambda _ l as)          = do (p', e'') <- exprPrecomputeVar ctx (extype r ctx $ E e) e'
+                                                            return (fst l ++ (concatMap fst as) ++ p', e'')
+    where e' = eApplyLambda (snd l) (map snd as)
 
 extype r ctx e = exprType r ctx e
 
