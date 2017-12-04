@@ -839,3 +839,17 @@ typedef chassis_id_t = bit<64>
 table Chassis ( id     : chassis_id_t
               , failed : bool
               , primary key (id) )
+
+typedef tunport_id_t = bit<64>
+
+// Each chassis is expected to have a port for vxlan tunneling
+table TunnelPort( id         : tunport_id_t
+                , portnum    : bit<16>
+                , switch     : chassis_id_t
+                , externalip : ip_addr_t
+                , primary key (id)
+                , foreign key (switch) references Chassis(id)
+                , unique (switch)
+                , unique (switch, portnum) )
+
+

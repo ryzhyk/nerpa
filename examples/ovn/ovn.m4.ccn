@@ -5,6 +5,7 @@ undefine(`eval')
 switch SChassis[Chassis]
 
 port PVSwitchPort[VSwitchPort](source vSwitchIngress, sink)
+port PTunnelPort[TunnelPort](source tunIngress, sink)
 
 procedure vSwitchIngress(port: VSwitchPort): sink = {
     var lport : LogicalSwitchPort;
@@ -483,13 +484,34 @@ procedure dstLookup(vport : VSwitchPort, lport : LogicalSwitchPort): sink = {
             }
         }
     };
-    sendToChassis(lport, dst)
+    sendToChassis(vport, lport, dst)
 }
 
 // Send packet to specified chassis.  
-procedure sendToChassis(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
-    // TODO
+procedure sendToChassis(vport : VSwitchPort, lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
+    if (vport.switch == chassis) {
+        // local delivery
+        vSwitchEgress(chassis, lport.lswitch)
+    } else {
+        the (dtun in TunnelPort | dtun.switch == chassis) {
+            pkt.vxlan.tun_dst = dtun.externalip;
+            pkt.vxlan.tun_id  = lport.lswitch;
+            the (stun in TunnelPort | stun.switch == vport.switch) {
+                send PTunnelPort[stun].out
+            }
+        }
+    }
+}
+
+procedure vSwitchEgress(chassis: chassis_id_t, lswitch : lswitch_id_t) : sink = {
     drop
 }
 
 procedure lportEgress(port: LogicalSwitchPort): sink = drop 
+
+
+
+
+procedure tunIngress(port: TunnelPort): sink = {
+    vSwitchEgress(port.switch, pkt.vxlan.tun_id)
+}
