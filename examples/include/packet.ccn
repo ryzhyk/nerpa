@@ -1,0 +1,223 @@
+typedef mac_addr_t = bit<48>
+
+function ethUnicastAddr(addr: mac_addr_t): bool   = addr[0:0] == 0
+function ethMulticastAddr(addr: mac_addr_t): bool = addr[0:0] == 1
+function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
+
+typedef ip4_addr_t = bit<32>
+typedef ip6_addr_t = bit<128>
+typedef ip_addr_t  = IPAddr4 {addr4 : ip4_addr_t}
+                   | IPAddr6 {addr6 : ip6_addr_t}
+
+typedef ip4_subnet_t = IP4Subnet { addr : ip4_addr_t
+                                 , mask : ip4_addr_t }
+
+typedef ip6_subnet_t = IP6Subnet { addr : ip6_addr_t
+                                 , mask : ip6_addr_t }
+
+typedef ip_subnet_t = IPSubnet4 {ip4_subnet : ip4_subnet_t}
+                    | IPSubnet6 {ip6_subnet : ip6_subnet_t}
+
+function ip4Match(addr: ip4_addr_t, subnet: ip4_subnet_t): bool =
+ (addr & subnet.mask) == (subnet.addr & subnet.mask)
+
+function ip6Match(addr: ip6_addr_t, subnet: ip6_subnet_t): bool =
+ (addr & subnet.mask) == (subnet.addr & subnet.mask)
+
+typedef Packet = eth_pkt_t
+
+typedef eth_pkt_t = EthPacket { vxlan   : vxlan_t
+                              , portnum : bit<16>
+                              , src     : mac_addr_t
+                              , dst     : mac_addr_t
+                              , vlan    : vlan_t
+                              , ct      : conn_track_t
+                              , payload : eth_payload_t}
+
+function pktIsIP(p: eth_pkt_t) : bool = 
+    match (p.payload) {
+        EthIP4{_} -> true,
+        EthIP6{_} -> true,
+        _         -> false
+    }
+
+function pktIsIP4(p: eth_pkt_t) : bool = 
+    match (p.payload) {
+        EthIP4{_} -> true,
+        _         -> false
+    }
+
+function pktIsDNSReq(p: eth_pkt_t) : bool =
+    match (p.payload) {
+        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}} -> dst == 53,
+        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}}       -> dst == 53,
+        _                                                                -> false
+    }
+
+// OVS connection tracker interface. See man ovs-ofctl for documentation
+typedef ct_port_sel_t = CTRandom
+                      | CTHash
+
+typedef ct_nat_t = CTNATNone
+                 | CTNATDefault // for established connections
+                 | CTNATSNAT { from_addr : ip_addr_t
+                             , from_port : bit<16>
+                             , alg       : ct_port_sel_t }
+                 | CTNATDNAT { to_addr   : ip_addr_t 
+                             , to_port   : bit<16> 
+                             , alg       : ct_port_sel_t }
+
+typedef ct_commit_t = CTCommit { mark   : bit<32>  // r/w
+                               , label  : bit<128> // r/w
+                               , nat    : ct_nat_t // read-only
+                               }
+
+typedef conn_track_t = CT { new    : bool        // read-only
+                          , est    : bool        // read-only
+                          , rel    : bool        // read-only
+                          , rpl    : bool        // read-only
+                          , inv    : bool        // read-only
+                          , trk    : bool        // read-only
+                          , snat   : bool        // read-only
+                          , dnat   : bool        // read-only
+                          , track  : bool        // write-only: writing any value to this bit sends the packet to connection tracker
+                          , commit : ct_commit_t // writing to this field commits the packet to connection tracking
+                          }    
+
+typedef vxlan_t = VXLAN { tun_dst : ip4_addr_t
+                        , tun_id  : bit<64> }
+
+typedef vlan_id_t = bit<12>
+
+typedef vlan_t = VLAN { pcp : bit<3>
+                      //, dei : bit<1> not supported by OVS
+                      , vid : vlan_id_t}
+
+typedef eth_payload_t = EthIP4   {ip4 : ip4_pkt_t}
+                      | EthIP6   {ip6 : ip6_pkt_t}
+                      | EthARP   {arp : arp_pkt_t}
+                      | EthOther {ethertype : bit<16>}
+
+typedef ip_proto_t = bit<8>
+
+typedef ip4_pkt_t = IP4Pkt { ihl      : bit<4>
+                           , dscp     : bit<6>
+                           , ecn      : bit<2>
+                           , totalLen : bit<16>
+                           , ident    : bit<16>
+                           , flagsOff : bit<16>
+                           , ttl      : bit<8>
+                           , proto    : ip_proto_t
+                           , src      : ip4_addr_t
+                           , dst      : ip4_addr_t
+                           , payload  : ip_payload_t}
+
+typedef ip6_pkt_t = IP6Pkt { dscp    : bit<6>
+                           , ecn     : bit<2>
+                           , ttl     : bit<8>
+                           , label   : bit<20>
+                           , proto   : ip_proto_t
+                           , src     : ip6_addr_t
+                           , dst     : ip6_addr_t
+                           , payload : ip_payload_t}
+
+typedef arp_op_t = ARPRequest 
+                 | ARPReply
+                 //| ARPOther {opcode : bit<16>}
+
+typedef arp_pkt_t = ARPPkt { op  : arp_op_t
+                           , spa : ip4_addr_t
+                           , tpa : ip4_addr_t
+                           , sha : mac_addr_t
+                           , tha : mac_addr_t}
+
+typedef ip_payload_t = IPTCP   { tcp : tcp_pkt_t}
+                     | IPUDP   { udp : udp_pkt_t}
+                     | IPICMP4 { icmp4 : icmp4_pkt_t}
+                     | IPICMP6 { icmp6 : icmp6_pkt_t}
+                     | IPOther { protocol : bit<8>}
+
+typedef tcp_pkt_t = TCPPkt { src   : bit<16>
+                           , dst   : bit<16>
+                           , flags : bit<9> }
+
+typedef udp_pkt_t = UDPPkt { src     : bit<16>
+                           , dst     : bit<16> 
+                           , len     : bit<16> 
+                           , payload : udp_payload_t}
+
+typedef udp_payload_t = UDPDHCP4{dhcp4 : dhcp4_pkt_t}
+                      | UDPDHCP6{dhcp6 : dhcp6_pkt_t}
+                      //| UDPDNS  {dns   : dns_pkt_t}
+                      //| UDPOther
+
+/*
+typedef dns_pkt_t = DNSPkt { id     : bit<16>
+                           , qr     : bit<1>
+                           , op     : bit<4>
+                           , aa     : bit<1>
+                           , tc     : bit<1>
+                           , rd     : bit<1>
+                           , ra     : bit<1>
+                           , rcode  : bit<4>
+                           , ...
+                           }
+*/
+
+typedef dhcp4_pkt_t = DHCP4Pkt { op       : bit<8>
+                               , htype    : bit<8>
+                               , hops     : bit<8>
+                               , xid      : bit<32>
+                               , secs     : bit<16>
+                               , flags    : bit<16>
+                               , ciaddr   : bit<32>
+                               , yiaddr   : bit<32>
+                               , siaddr   : bit<32>
+                               , giaddr   : bit<32>
+                               , chaddr   : bit<128>
+                               , options  : dhcp4_options_t
+                               }
+
+// XXX: encode remaining DHCP options, some of them require support for arrays
+typedef dhcp4_options_t = DHCP4Options { cidr       : ip4_subnet_t
+                                       , server_id  : ip4_addr_t
+                                       , server_mac : mac_addr_t
+                                       , router     : ip4_addr_t
+                                       , lease_time : bit<32> }
+
+
+typedef dhcp6_pkt_t = DHCP6Pkt { op       : bit<8>
+                               , options  : dhcp6_options_t
+                               }
+
+typedef dhcp6_options_t = DHCP6Options { cidr       : ip4_subnet_t
+                                       , server_id  : duid_t}
+
+typedef duid_t = DUID_LLT  { hw_type : bit<16>
+                           , time    : bit<32>
+                           , mac     : mac_addr_t
+                           }
+               | DUID_EN   { iana_num : bit<32>
+                           , id       : bit<128> // upper bound?
+                           }
+               | DUID_LL   { hw_type : bit<16>
+                           , mac     : mac_addr_t
+                           }
+               | DUID_UUID { uuid : bit<128> }
+
+typedef icmp4_pkt_t = ICMP4Pkt { type : bit<8>
+                               , code : bit<8> }
+
+typedef icmp6_pkt_t = ICMP6Pkt { type    : bit<8>
+                               , code    : bit<8> 
+                               , payload : icmp6_payload_t}
+
+typedef icmp6_payload_t = ICMP6NS { ns : icmp6_ns_pkt_t}  // neighbor solicitation
+                        | ICMP6NA { na : icmp6_na_pkt_t}  // neighbor advertisement
+                        | ICMP6Other
+
+typedef icmp6_ns_pkt_t = ICMP6NSPkt { target : ip6_addr_t
+                                    , sll    : mac_addr_t }
+
+typedef icmp6_na_pkt_t = ICMP6NAPkt { target : ip6_addr_t
+                                    , tll    : mac_addr_t }

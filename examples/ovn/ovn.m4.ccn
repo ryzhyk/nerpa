@@ -488,6 +488,7 @@ procedure dstLookup(vport : VSwitchPort, lport : LogicalSwitchPort): sink = {
 
 // Send packet to specified chassis.  
 procedure sendToChassis(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
+    // TODO
     drop
 }
 
