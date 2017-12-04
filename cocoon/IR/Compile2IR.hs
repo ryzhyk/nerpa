@@ -178,7 +178,7 @@ compileExprAt vars ctx entrynd _ (E e@(ESend _ (E el@(ELocation _ _ x _)))) = do
     updateNode entrynd (I.Par [I.BB [] $ I.Send port]) []
     return vars
 
-compileExprAt vars ctx entrynd _ (E e@(EFork _ v t c b)) = do
+compileExprAt vars ctx entrynd exitnd (E e@(EFork _ v t c b)) = do
     -- Transform the fork statement to drop packets that do not match
     -- the fork condition right after fork.  This is necessary, since
     -- our OpenFlow backend will fork a packet on every row of the table.
@@ -192,7 +192,7 @@ compileExprAt vars ctx entrynd _ (E e@(EFork _ v t c b)) = do
     pl <- get
     let (cdeps, cpl) = exprDeps vars' (CtxForkCond e ctx) rel (vnameAt v entrynd) c pl
         cdeps' = cdeps `intersect` plvars
-    (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) Nothing b'
+    (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) exitnd b'
     updateNode entrynd (I.Fork t cdeps' cpl $ I.BB asns $ I.Goto entryndb) [entryndb]
     return vars
 

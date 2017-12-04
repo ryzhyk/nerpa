@@ -75,7 +75,7 @@ data Expr = EPktField {exprFieldName :: FieldName, exprT :: Type}
           | EBit      {exprWidth :: Int, exprIntVal :: Integer}
           | EBinOp    {exprBOp :: BOp, exprArg1 :: Expr, exprArg2 :: Expr}
           | EUnOp     {exprUOp :: UOp, exprArg :: Expr}
-          | ELambda   {exprArgs :: [Expr], exprLambdaType :: Type}
+          | ELambda   {exprArgs :: [Expr], exprLambdaType :: Type} -- only used when computing dependencies
           deriving (Eq, Ord)
 
 instance PP Expr where
