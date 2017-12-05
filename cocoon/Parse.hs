@@ -547,6 +547,7 @@ rexpr =  buildExpressionParser retable rterm
 
 rterm  = withPos $
          erelpred
+     <|> (eTuple <$> (parens $ commaSep rexpr))
      <|> estruct
      <|> eint
      <|> ebool
