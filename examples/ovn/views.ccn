@@ -2,6 +2,14 @@
 // view VIFPort( id : lport_id_t )
 // VIFPort(id) :- LogicalSwitchPort(id,_,LPortVIF{_,_,_},_,_,_,_,_,_)
 
+
+/* Trunk port */
+
+view TrunkPort(lport : lport_id_t)
+
+TrunkPort(lport) :- LogicalSwitchPort(lport, _, _, _, _, _, _, _),
+                    LogicalSwitchPort(_, _, LPortVIF{lport, _, _}, _, _, _, _, _)
+
 /* Port security */
 typedef port_sec_type_t = PortSecNone
                         | PortSecMAC
@@ -89,44 +97,110 @@ LPortDHCP6AddrOpts(lport, mac, ip, server_ip, options) :- LPortMACIP(_, lport, m
 
 /* Logical switch/port to chassis mapping */
 
+// Logical ports present at chassis (localnet and router ports are present at all chassis)
+view LPortAtChassis( lport   : lport_id_t
+                   , lswitch : lswitch_id_t
+                   , chassis : chassis_id_t
+                   , float   : bool)
+
+LPortAtChassis(lport, lswitch, chassis, false) :- 
+    LogicalSwitchPort(lport, lswitch, LPortVM{chassis}, _, en, _, _, _), en,
+    not TrunkPort(lport)
+
+LPortAtChassis(lport, lswitch, chassis, false) :- 
+    LogicalSwitchPort(lport, lswitch, LPortL2Gateway{_, chassis}, _, en, _, _, _), en
+
+LPortAtChassis(lport, lswitch, chassis, true)  :- 
+    Chassis(chassis, f), f==false,
+    LogicalSwitchPort(lport, lswitch, LPortLocalnet{pnet}, _, en, _, _, _), en
+
+LPortAtChassis(lport, lswitch, chassis, true)  :- 
+    Chassis(chassis, f), f==false,
+    LogicalSwitchPort(lport, lswitch, LPortRouter{_}, _, en, _, _, _), en
+
+LPortAtChassis(lport, lswitch, chassis, false)  :- 
+    LogicalSwitchPort(lport, lswitch, LPortVIF{p, r, t}, _, en, _, _, _), en,
+    LogicalSwitchPort(p, _, LPortVM{chassis}, _, _, _, _, _)
+
+// logical ports with known mac addresses at chassis (localnet and router ports are present at all chassis)
+view LPortMACChassis ( lswitch : lswitch_id_t
+                     , lport   : lport_id_t
+                     , mac     : mac_addr_t
+                     , chassis : chassis_id_t
+                     , float   : bool)
+
+LPortMACChassis(lswitch, lport, mac, chassis, false) :- 
+    LogicalSwitchPort(lport, lswitch, LPortVM{chassis}, _, en, _, _, _), en,
+    LogicalSwitchPortMAC(lport, mac)
+
+LPortMACChassis(lswitch, lport, mac, chassis, false) :- 
+    LogicalSwitchPort(lport, lswitch, LPortVIF{p, r, t}, _, en, _, _, _), en,
+    LogicalSwitchPort(p, _, LPortVM{chassis}, _, _, _, _, _), 
+    LogicalSwitchPortMAC(lport, mac)
+
+LPortMACChassis(lswitch, lport, mac, chassis, false) :- 
+    LogicalSwitchPort(lport, lswitch, LPortL2Gateway{pnet, chassis}, _, en, _, _, _), en,
+    LogicalSwitchPortMAC(lport, mac)
+
+LPortMACChassis(lswitch, lport, mac, chassis, true) :- 
+    Chassis(chassis, f), f==false,
+    LogicalSwitchPort(lport, lswitch, LPortLocalnet{pnet}, _, en, _, _, _), en,
+    LogicalSwitchPortMAC(lport, mac)
+
+LPortMACChassis(lswitch, lport, mac, chassis, true) :- 
+    Chassis(chassis, f), f==false,
+    LogicalSwitchPort(lport, lswitch, LPortRouter{r}, _, en, _, _, _), en,
+    LogicalSwitchPortMAC(lport, mac)
+
+// logical ports with unknown mac addresses at chassis (localnet and router ports are present at all chassis)
+view LPortUnknownMACChassis ( lswitch : lswitch_id_t  
+                            , lport   : lport_id_t 
+                            , chassis : chassis_id_t
+                            , float   : bool)
+
+LPortUnknownMACChassis(lswitch, lport, chassis, false) :- 
+    LogicalSwitchPort(lport, lswitch, LPortVM{chassis}, _, en, _, _, u), en, u,
+    not TrunkPort(lport)
+
+LPortUnknownMACChassis(lswitch, lport, chassis, false) :- 
+    LogicalSwitchPort(lport, lswitch, LPortVIF{p, r, t}, _, en, _, _, u), en, u,
+    LogicalSwitchPort(p, _, LPortVM{chassis}, _, _, _, _, _)
+
+LPortUnknownMACChassis(lport, lswitch, chassis, false) :- 
+    LogicalSwitchPort(lport, lswitch, LPortL2Gateway{pnet, chassis}, _, en, _, _, u), en, u
+
+LPortUnknownMACChassis(lport, lswitch, sender, true)  :- 
+    Chassis(sender, f), f==false,
+    LogicalSwitchPort(lport, lswitch, LPortLocalnet{pnet}, _, en, _, _, u), en, u
+
+LPortUnknownMACChassis(lport, lswitch, sender, true)  :- 
+    Chassis(sender, f), f==false,
+    LogicalSwitchPort(lport, lswitch, LPortRouter{r}, _, en, _, _, u), en, u
+
 // Switch has presence at chassis (through VM or L2Gateway port)
-view LSwitchAtChassis( lswitch : lswitch_id_t
+view LSwitchAtChassis( sender  : chassis_id_t
+                     , lswitch : lswitch_id_t
                      , chassis : chassis_id_t)
 
-LSwitchAtChassis(lswitch, chassis) :- LogicalSwitchPort(_, lswitch, LPortVM{chassis}, _, en, _, _, _), en
-LSwitchAtChassis(lswitch, chassis) :- LogicalSwitchPort(_, lswitch, LPortL2Gateway{_, chassis}, _, en, _, _, _), en
+LSwitchAtChassis(sender, lswitch, chassis) :- Chassis(sender, f), f==false, 
+                                              LPortAtChassis(_, lswitch, chassis, f), ((not f) or (chassis == sender))
 
 typedef destination_t = DSTChassis {chassis : chassis_id_t}
                       | DSTLocal
 
+// Switch has known MAC address at chassis
 view MACChassis ( lswitch : lswitch_id_t  
                 , mac     : mac_addr_t
                 , chassis : destination_t)
 
-MACChassis(lswitch, mac, DSTChassis{chassis}) :- LogicalSwitchPort(lport, lswitch, LPortVM{chassis}, _, en, _, _, _), en,
-                                                 LogicalSwitchPortMAC(lport, mac)
+MACChassis(lswitch, mac, DSTChassis{chassis}) :- LPortMACChassis(lswitch, _, mac, chassis, f), not f
+MACChassis(lswitch, mac, DSTLocal)            :- LPortMACChassis(lswitch, _, mac, _, f), f
 
-MACChassis(lswitch, mac, DSTChassis{chassis}) :- LogicalSwitchPort(lport, lswitch, LPortVIF{p, _, _}, _, en, _, _, _), en,
-                                                 LogicalSwitchPort(p, _, LPortVM{chassis}, _, _, _, _, _), 
-                                                 LogicalSwitchPortMAC(lport, mac)
+// Switch has unknown MAC address at chassis
+view UnknownMACChassis ( sender  : chassis_id_t
+                       , lswitch : lswitch_id_t  
+                       , chassis : chassis_id_t)
 
-MACChassis(lswitch, mac, DSTChassis{chassis}) :- LogicalSwitchPort(lport, lswitch, LPortL2Gateway{_, chassis}, _, en, _, _, _), en,
-                                                 LogicalSwitchPortMAC(lport, mac)
-
-MACChassis(lswitch, mac, DSTLocal) :- LogicalSwitchPort(lport, lswitch, LPortLocalnet{_}, _, en, _, _, _), en,
-                                      LogicalSwitchPortMAC(lport, mac)
-
-MACChassis(lswitch, mac, DSTLocal) :- LogicalSwitchPort(lport, lswitch, LPortRouter{_}, _, en, _, _, _), en,
-                                      LogicalSwitchPortMAC(lport, mac)
-
-view UnknownMACChassis ( lswitch : lswitch_id_t  
-                       , chassis : destination_t)
-
-UnknownMACChassis(lswitch, DSTChassis{chassis}) :- LogicalSwitchPort(lport, lswitch, LPortVM{chassis}, _, en, _, _, u), en, u
-UnknownMACChassis(lswitch, DSTChassis{chassis}) :- LogicalSwitchPort(lport, lswitch, LPortVIF{p, _, _}, _, en, _, _, u), en, u,
-                                                   LogicalSwitchPort(p, _, LPortVM{chassis}, _, _, _, _, _)
-UnknownMACChassis(lswitch, DSTChassis{chassis}) :- LogicalSwitchPort(lport, lswitch, LPortL2Gateway{_, chassis}, _, en, _, _, u), en, u
-UnknownMACChassis(lswitch, DSTLocal) :- LogicalSwitchPort(lport, lswitch, LPortLocalnet{_}, _, en, _, _, u), en, u
-UnknownMACChassis(lswitch, DSTLocal) :- LogicalSwitchPort(lport, lswitch, LPortRouter{_}, _, en, _, _, u), en, u
-
-
+UnknownMACChassis(sender, lswitch, chassis) :-
+    Chassis(sender, f), f==false, 
+    LPortUnknownMACChassis(_, lswitch, chassis, f), (f => (chassis == sender))

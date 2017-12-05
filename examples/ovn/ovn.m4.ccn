@@ -464,23 +464,20 @@ procedure dstLookup(vport : VSwitchPort, lport : LogicalSwitchPort): sink = {
     var dst : chassis_id_t;
     if (ethMulticastAddr(pkt.dst)) {
         /* fork to all chassis that host this switch */
-        fork (chassis in LSwitchAtChassis | chassis.lswitch == lport.lswitch) {
+        fork (chassis in LSwitchAtChassis | chassis.sender == vport.switch and chassis.lswitch == lport.lswitch) {
             dst = chassis.chassis
         }
     } else {
         /* find matching chassis */
         the (chassis in MACChassis | chassis.lswitch == lport.lswitch and chassis.mac == pkt.dst) {
             dst = match (chassis.chassis) {
-                        DSTLocal      -> vport.switch,
-                        DSTChassis{c} -> c
-            }
+                      DSTLocal      -> vport.switch,
+                      DSTChassis{c} -> c
+                  }
         } default {
             /* destination unknown: send to all chassis that host ports with unknown addresses */
-            fork (chassis in UnknownMACChassis | chassis.lswitch == lport.lswitch) {
-                dst = match (chassis.chassis) {
-                            DSTLocal      -> vport.switch,
-                            DSTChassis{c} -> c
-                }
+            fork (chassis in UnknownMACChassis | chassis.sender == vport.switch and chassis.lswitch == lport.lswitch) {
+                dst = chassis.chassis
             }
         }
     };
@@ -488,12 +485,11 @@ procedure dstLookup(vport : VSwitchPort, lport : LogicalSwitchPort): sink = {
 }
 
 // Send packet to specified chassis.  
-procedure sendToChassis(vport : VSwitchPort, lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
-    if (vport.switch == chassis) {
-        // local delivery
-        vSwitchEgress(chassis, lport.lswitch)
+procedure sendToChassis(vport : VSwitchPort, lport : LogicalSwitchPort, dst : chassis_id_t): sink = {
+    if (dst == vport.switch) {
+        vSwitchEgress(true, dst, lport.lswitch)
     } else {
-        the (dtun in TunnelPort | dtun.switch == chassis) {
+        the (dtun in TunnelPort | dtun.switch == dst) {
             pkt.vxlan.tun_dst = dtun.externalip;
             pkt.vxlan.tun_id  = lport.lswitch;
             the (stun in TunnelPort | stun.switch == vport.switch) {
@@ -503,15 +499,43 @@ procedure sendToChassis(vport : VSwitchPort, lport : LogicalSwitchPort, chassis 
     }
 }
 
-procedure vSwitchEgress(chassis: chassis_id_t, lswitch : lswitch_id_t) : sink = {
-    drop
+/* Packet arrives to VSwitch ready for logical switch port egress 
+   processing.  Establish port(s) it belongs to and call lportEgress.
+   The first argument is true iff the packet originated at the local 
+   switch. */
+procedure vSwitchEgress(local : bool, chassis: chassis_id_t, lswitch : lswitch_id_t) : sink = {
+    /* multicast? - deliver to all local ports on this switch */
+    var lport : lport_id_t;
+    if (ethMulticastAddr(pkt.dst)) {
+        fork(lp in LPortAtChassis | lp.lswitch == lswitch and lp.chassis == chassis and (lp.float => local)) {
+            lport = lp.lport
+        }
+    } else {
+        /* unicast - deliver to port that owns the address, or to all ports with unknown addresses */
+        the (lp in LPortMACChassis | lp.lswitch == lswitch and 
+                                     lp.chassis == chassis and 
+                                     lp.mac == pkt.dst and 
+                                     (lp.float => local)) {
+            lport = lp.lport
+        } default {
+            /* destination unknown: send to all chassis that host ports with unknown addresses */
+            fork (lp in LPortUnknownMACChassis | lp.lswitch == lswitch and 
+                                                 lp.chassis == chassis and 
+                                                 (lp.float => local)) {
+                lport = lp.lport
+            }
+        }
+    };
+    the (lp in LogicalSwitchPort | lp.id == lport) {
+        lportEgress(lp)
+    }
 }
 
-procedure lportEgress(port: LogicalSwitchPort): sink = drop 
+procedure lportEgress(lport: LogicalSwitchPort): sink = drop 
 
 
 
 
 procedure tunIngress(port: TunnelPort): sink = {
-    vSwitchEgress(port.switch, pkt.vxlan.tun_id)
+    vSwitchEgress(false, port.switch, pkt.vxlan.tun_id)
 }

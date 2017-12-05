@@ -50,6 +50,14 @@ typedef lport_type_t = LPortVM { vmchassis : chassis_id_t }
                                       , chassis : chassis_id_t }
                      // | LPortVTEP
 
+function isFloatingPort(ptype : lport_type_t) : bool = {
+    match (ptype) {
+        LPortLocalnet{_} -> true,
+        LPortRouter{_}   -> true,
+        _                -> false
+    }
+}
+
 /* LogicalSwitch table 
    Each row represents one L2 logical switch.
  
@@ -203,6 +211,8 @@ table LogicalSwitchPort( id            : lport_id_t
                        , foreign key (ptype.chassis) references Chassis(id) 
                        , foreign key (dhcp4_options.options) references DHCPv4Options(id) 
                        , foreign key (dhcp6_options.options) references DHCPv6Options(id) )
+
+               
 
 typedef vsport_id_t = bit<64>
 
