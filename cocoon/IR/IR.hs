@@ -23,6 +23,7 @@ module IR.IR where
 import qualified Data.Map             as M
 import qualified Data.Graph.Inductive as G 
 import qualified Data.GraphViz        as G
+import qualified Data.Set             as S
 import Text.PrettyPrint
 import Data.Text.Lazy(unpack)
 import Data.List
@@ -356,7 +357,7 @@ data CFGCtx = CtxNode          {ctxNode :: NodeId}
             | CtxCondNxt       {ctxNode :: NodeId, ctxCond :: Int}
             | CtxParAct        {ctxNode :: NodeId, ctxBB :: Int, ctxAct :: Int}
             | CtxParNxt        {ctxNode :: NodeId, ctxBB :: Int}
-            deriving (Eq, Show)
+            deriving (Eq, Ord, Show)
 
 isActCtx :: CFGCtx -> Bool
 isActCtx CtxForkAct{}       = True
@@ -454,14 +455,14 @@ nodePre cfg nd = nub $ concatMap nodePre' $ G.pre cfg nd
 -- match - add context to result set and stop following the branch
 -- abort - stop following the branch
 ctxSearchForward :: CFG -> CFGCtx -> (CFGCtx -> Bool) -> (CFGCtx -> Bool) -> [CFGCtx]
-ctxSearchForward cfg ctx match abort = ctxSearchForward' [] (ctxSuc cfg ctx)
+ctxSearchForward cfg ctx match abort = S.toList $ ctxSearchForward' S.empty (S.fromList $ ctxSuc cfg ctx)
     where
-    ctxSearchForward' :: [CFGCtx] -> [CFGCtx] -> [CFGCtx]
-    ctxSearchForward' _ [] = []
-    ctxSearchForward' explored front = {-trace ("ctxSearchForward' " ++ show front) $-} matches ++ ctxSearchForward' (explored ++ front) front''
-        where (matches, front') = partition match front
-              rest = filter (not . abort) front'
-              front'' = (nub $ concatMap (ctxSuc cfg) rest) \\ explored
+    ctxSearchForward' :: S.Set CFGCtx -> S.Set CFGCtx -> S.Set CFGCtx
+    ctxSearchForward' _ x | S.null x = S.empty
+    ctxSearchForward' explored front = {-trace ("-> " ++ show (S.size explored) ++ " " ++ show (S.size front)) $-} S.union matches (ctxSearchForward' (S.union explored front) front'')
+        where (matches, front') = S.partition match front
+              rest = S.filter (not . abort) front'
+              front'' = (S.fromList $ concatMap (ctxSuc cfg) $ S.toList rest) S.\\ explored
 
 ctxSearchBackward :: CFG -> CFGCtx -> (CFGCtx -> Bool) -> (CFGCtx -> Bool) -> [CFGCtx]
 ctxSearchBackward cfg ctx match abort = ctxSearchBackward' [] (ctxPre cfg ctx)

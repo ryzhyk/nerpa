@@ -24,7 +24,7 @@ import qualified Data.Map as M
 import Control.Monad.State
 import Data.List
 import Data.Maybe
---import Debug.Trace
+import Debug.Trace
 --import System.IO.Unsafe
 --import Data.Text.Lazy (unpack)
 
@@ -41,13 +41,14 @@ optimize p pl | modified  = optimize (p+1) pl'
 -- one pass of the optimizer
 pass :: Pipeline -> State Bool Pipeline
 pass pl = do
-    pl1 <- fixpoint pl (\pl_ -> do pl1_ <- optUnusedAssigns pl_
-                                   pl2_ <- optUnusedVars pl1_
+    pl1 <- fixpoint pl (\pl_ -> do pl1_ <- {-trace "optUnusedAssigns" $-} optUnusedAssigns pl_
+                                   pl2_ <- {-trace "optUnusedVars" $-} optUnusedVars pl1_
+                                   {-trace "optVarSubstitute" $-}
                                    optVarSubstitute pl2_)
     -- do these last, as they may duplicate code, breaking the variable
     -- substitution optimization
-    pl2 <- fixpoint pl1 optMergeCond
-    pl3 <- fixpoint pl2 optStraightLine
+    pl2 <- {-trace "optMergeCond" $-} fixpoint pl1 optMergeCond
+    pl3 <- {-trace "optStraightLine" $-} fixpoint pl2 optStraightLine
     return pl3
 
 fixpoint :: a -> (a -> State Bool a) -> State Bool a
