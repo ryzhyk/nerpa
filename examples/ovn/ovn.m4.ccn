@@ -27,17 +27,17 @@ procedure vSwitchIngress(port: VSwitchPort): sink = {
 
 // XXX: TODO: QoS marking
 procedure lportIngress(vport: VSwitchPort, lport: LogicalSwitchPort): sink = {
-    if (not portSecurityAllowed(lport, pkt)) drop;
+    if (not ingressPortSecurity(lport, pkt)) drop;
 
     /* Run through connection tracker if needed */
-    connTrack(lport);
+    ingressConnTrack(lport);
 
     /* acl */
-    (var allowed, var commit) = acl(lport);
+    (var allowed, var commit) = acl(lport, ACLFrom);
     if (not allowed) drop;
 
     /* load balancing */
-    lb(lport, commit);
+    ingressLB(lport, commit);
 
     /* ARP/ND */
     var arpresp = arp(lport);
@@ -58,7 +58,7 @@ procedure lportIngress(vport: VSwitchPort, lport: LogicalSwitchPort): sink = {
     dstLookup(vport, lport)
 }
 
-function portSecurityAllowed(lport: LogicalSwitchPort, p: Packet): bool = {
+function ingressPortSecurity(lport: LogicalSwitchPort, p: Packet): bool = {
     /* Ingress table 0 contains these logical flows:
         · Priority 100 flows to drop packets with VLAN tags or mul‐
           ticast Ethernet source addresses.
@@ -85,7 +85,7 @@ function portSecurityAllowed(lport: LogicalSwitchPort, p: Packet): bool = {
                     match ((p.payload, psec.stype)) {
                         (EthARP{_}, _)   -> portSecARP(lport, p),
                         (EthOther{_}, _) -> true,
-                        (_, PortSecIP)   -> portSecIP(lport, p),
+                        (_, PortSecIP)   -> ingressPortSecIP(lport, p),
                         _                -> true
                     }
                 } default { false }
@@ -94,7 +94,7 @@ function portSecurityAllowed(lport: LogicalSwitchPort, p: Packet): bool = {
     }
 }
 
-function portSecIP(lport: LogicalSwitchPort, p: Packet): bool = {
+function ingressPortSecIP(lport: LogicalSwitchPort, p: Packet): bool = {
     /* Ingress Table 1: Ingress Port Security - IP
        Ingress table 1 contains these logical flows:
           · For each element in the port security set having one or more IPv4 or IPv6 addresses (or both),
@@ -109,7 +109,7 @@ function portSecIP(lport: LogicalSwitchPort, p: Packet): bool = {
         true
     } else {
         the (psecip in PortSecurityIP | psecip.lport == lport.id and psecip.mac == p.src and ipSrcMatch(p.payload, psecip.subnet)) {
-            portSecNDP(lport, p)
+            ingressPortSecNDP(lport, p)
         } default { false }
     }
 }
@@ -154,7 +154,7 @@ function portSecARP(lport: LogicalSwitchPort, p: Packet): bool = {
     } default { false }
 }
 
-function portSecNDP(lport: LogicalSwitchPort, p: Packet): bool = {
+function ingressPortSecNDP(lport: LogicalSwitchPort, p: Packet): bool = {
     match (p) {
         EthPacket {_,_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{_, sll}}}}}}} -> 
             the (psec in PortSecurityMAC | psec.lport == lport.id and psec.mac == p.src and psec.mac == sll) {
@@ -178,7 +178,7 @@ function portSecNDP(lport: LogicalSwitchPort, p: Packet): bool = {
    This table prepares flows for all possible stateful processing in next tables.  It contains a priority-0 flow that simply moves traffic to the next table.  A priority-100 flow sends the packets to connection tracker based on a hint provided by the  previous tables (with a match for reg0[0] == 1) by using the ct_next; action.
 */
 
-procedure connTrack(lport : LogicalSwitchPort): () = {
+procedure ingressConnTrack(lport : LogicalSwitchPort): () = {
     var needCT = false;
     the (lp in LPortStatefulACL | lp.lport == lport.id) {
         needCT = true
@@ -206,7 +206,7 @@ procedure connTrack(lport : LogicalSwitchPort): () = {
     + A priority-65535 flow that drops all traffic marked by the connection tracker as invalid.
     + A priority-65535 flow that drops all trafic in the reply direction with ct_label[0] set meaning that the  connection  should  no  longer be allowed due to a policy change.  Packets in the request direction are skipped here to let a newly created ACL re-allow this connection.
 */
-procedure acl(lport : LogicalSwitchPort) : (bool, bool) = {
+procedure acl(lport : LogicalSwitchPort, dir : acl_dir_t) : (bool, bool) = {
     // XXX: how to determine if the logical datapath has a stateful ACL
     if (pkt.ct.inv) {
         (false, false)
@@ -217,7 +217,7 @@ procedure acl(lport : LogicalSwitchPort) : (bool, bool) = {
     } else if (pkt.ct.rpl and (pkt.ct.commit.label[0:0] == 1)) {
         (false, false)
     } else {
-        the (acl in ACL | eval(acl.match_cond)(pkt) and acl.lswitch == lport.lswitch and acl.direction == ACLFrom) {
+        the (acl in ACL | eval(acl.match_cond)(pkt) and acl.lswitch == lport.lswitch and acl.direction == dir) {
             match (acl.action) {
                 ACLAllow        -> (true, true),
                 ACLAllowRelated -> 
@@ -255,7 +255,7 @@ procedure acl(lport : LogicalSwitchPort) : (bool, bool) = {
     · A priority-100 flow sends the packets to connection tracker using ct_lb; as the action based on a hint provided by the previous tables (with a match for reg0[2] == 1).
     · A priority-0 flow that simply moves traffic to the next table.
  */
-procedure lb(lport : LogicalSwitchPort, commit : bool) : () = {
+procedure ingressLB(lport : LogicalSwitchPort, commit : bool) : () = {
     any (lb in LPortLBVIPIP | pkt.ct.new and 
                               lb.lport == lport.id and 
                               lb.proto == pkt.payload.ip4.proto and 
@@ -531,10 +531,95 @@ procedure vSwitchEgress(local : bool, chassis: chassis_id_t, lswitch : lswitch_i
     }
 }
 
-procedure lportEgress(lport: LogicalSwitchPort): sink = drop 
+procedure lportEgress(lport: LogicalSwitchPort): sink = {
+    /* Run through connection tracker if needed */
+    egressConnTrack(lport);
 
+    /* XXX: I don't understand how LB works on egress */
+    var lbcommit = egressLB(lport);
 
+    /* acl */
+    (var allowed, var aclcommit) = acl(lport, ACLTo);
+    if (not allowed) {
+        drop
+    } else if (lbcommit) {
+        pkt.ct.commit = CTCommit { 0, 0, CTNATDefault}
+    } else if (aclcommit) {
+        pkt.ct.commit = CTCommit { 0, 0, CTNATNone}
+    };
 
+    if (not egressPortSecurity(lport, pkt)) drop;
+
+    deliver(lport)
+}
+
+procedure deliver(lport : LogicalSwitchPort): sink = {
+    drop
+}
+
+procedure egressConnTrack(lport : LogicalSwitchPort): () = {
+    var needCT = false;
+    the (lp in LPortStatefulACL | lp.lport == lport.id) {
+        needCT = true
+    } default { () };
+
+    the (lp in LPortLB | lp.lport == lport.id) {
+        needCT = true
+    } default { () };
+
+    // sends the packet to connection tracker
+    pkt.ct.track = true
+}
+
+procedure egressLB(lport : LogicalSwitchPort) : bool = {
+    pkt.ct.est and (not pkt.ct.rel) and (not pkt.ct.new) and (not pkt.ct.inv)
+}
+
+/*  
+    Egress Table 7: Egress Port Security - IP
+    This is similar to the port security logic in table Ingress Port Security - IP except that outport, eth.dst, ip4.dst and ip6.dst are checked instead of  inport,  eth.src,  ip4.src and ip6.src
+
+    Egress Table 8: Egress Port Security - L2
+
+    This  is  similar to the ingress port security logic in ingress table Admission Control and Ingress Port Security - L2, but with important differences. Most obviously, outport and eth.dst are checked instead of inport and eth.src. Second, packets directed to broadcast or multicast eth.dst are always accepted instead of being subject  to  the  port  security rules;  this  is implemented through a priority-100 flow that matches on eth.mcast with action output;. Finally, to ensure that even broadcast and multicast packets are not delivered to disabled logical ports, a priority-150 flow for each disabled logical outport overrides the priority-100 flow with a drop; action.
+*/
+function egressPortSecurity(lport: LogicalSwitchPort, p: Packet): bool = {
+    if (not lport.enabled) {
+        false
+    } else if (ethMulticastAddr(p.dst)) {
+        true 
+    } else { 
+        the (psec in PortSecurityType | psec.lport == lport.id) {
+            if (psec.stype == PortSecNone) { true }
+            else {
+                the (psecmac in PortSecurityMAC | psecmac.lport == lport.id and psecmac.mac == p.dst) {
+                    match (psec.stype) {
+                        PortSecIP -> egressPortSecIP(lport, p),
+                        _         -> true
+                    }
+                } default { false }
+            }
+        }
+    }
+}
+
+function egressPortSecIP(lport: LogicalSwitchPort, p: Packet): bool = {
+    if (isPktDHCPDiscovery(p) or isPktDAD(p)) {
+        true
+    } else {
+        the (psecip in PortSecurityIP | psecip.lport == lport.id and psecip.mac == p.dst and ipDstMatch(p.payload, psecip.subnet)) {
+            true
+        } default { false }
+    }
+}
+
+function ipDstMatch(p: eth_payload_t, subnet: ip_subnet_t): bool = {
+    match ((p, subnet)) {
+        (EthIP4{ip4}, IPSubnet4{subnet4}) -> ip4Match(ip4.dst, subnet4),
+        (EthIP6{ip6}, IPSubnet6{subnet6}) -> ip6Match(ip6.dst, subnet6),
+        _                                 -> false
+    }
+}
 
 procedure tunIngress(port: TunnelPort): sink = {
     vSwitchEgress(false, port.switch, pkt.vxlan.tun_id)

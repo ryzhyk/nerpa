@@ -64,6 +64,9 @@ LPortLBVIPIP(lport, proto, vip, ip) :- LogicalSwitchPort(lport, lswitch, _, _, _
                                        LBSwitch(lb, lswitch),
                                        LBIP(lb, vip, ip)
 
+view LPortLB( lport : lport_id_t )
+
+LPortLB(lport) :- LPortLBVIP(lport, _)
 
 /* Logical switch port addressing */
 view LPortMACIP ( lswitch : lswitch_id_t
