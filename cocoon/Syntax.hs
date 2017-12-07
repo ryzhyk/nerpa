@@ -62,6 +62,7 @@ module Syntax( pktVar
              , ctxIsSeq1, ctxInSeq1
              , ctxIsTyped
              , ctxIsDelete, ctxInDelete
+             , ctxIsQueryCond, ctxInQueryCond
              , conj
              , disj
              , exprSequence) where
@@ -901,3 +902,13 @@ ctxIsDelete _           = False
 
 ctxInDelete :: ECtx -> Maybe ECtx
 ctxInDelete ctx = find ctxIsDelete $ ctxAncestors ctx
+
+ctxIsQueryCond :: ECtx -> Bool
+ctxIsQueryCond CtxWithCond{} = True
+ctxIsQueryCond CtxAnyCond{}  = True
+ctxIsQueryCond CtxForkCond{} = True
+ctxIsQueryCond CtxForCond{}  = True
+ctxIsQueryCond _             = False
+
+ctxInQueryCond :: ECtx -> Bool
+ctxInQueryCond ctx = any ctxIsQueryCond $ ctxAncestors ctx

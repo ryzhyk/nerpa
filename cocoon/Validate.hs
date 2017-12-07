@@ -547,10 +547,13 @@ checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p
 -- Traverse again with types.  This pass ensures that all sub-expressions
 -- have well-defined types that match their context
 exprValidate2 :: (MonadError String me) => Refine -> ECtx -> ExprNode Type -> me ()
-exprValidate2 r _   (EField p e f)      = case typ' r e of
-                                               t@(TStruct _ _) -> assertR r (isJust $ find ((==f) . name) $ structArgs t) p
-                                                                          $ "Unknown field \"" ++ f ++ "\" in struct of type " ++ show t 
-                                               _               -> errR r (pos e) $ "Expression is not a struct"
+exprValidate2 r ctx (EField p e f)      = do case typ' r e of
+                                                  t@TStruct{} -> assertR r (isJust $ find ((==f) . name) $ structArgs t) p
+                                                                           $ "Unknown field \"" ++ f ++ "\" in struct of type " ++ show t 
+                                                  _           -> errR r (pos e) $ "Expression is not a struct"
+                                             when (ctxInQueryCond ctx)
+                                                  $ assertR r (not $ structFieldGuarded (typeCons $ typ' r e) f) p $ "Guarded field " ++ f ++ " accessed in query condition"
+                                                       
 exprValidate2 r _   (ESlice p e h l)    = case typ' r e of
                                                TBit _ w -> do assertR r (h >= l) p 
                                                                       $ "Upper bound of the slice must be greater than lower bound"
