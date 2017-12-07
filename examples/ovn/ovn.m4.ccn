@@ -15,7 +15,10 @@ procedure vSwitchIngress(port: VSwitchPort): sink = {
         } default { drop }
     } else {
         // trunk port? find VIF interface; strip vlan tag
-        the (p in LogicalSwitchPort | p.ptype.parent == p.id and p.ptype.tag == pkt.vlan.vid and p.enabled) {
+        the (p in LogicalSwitchPort | match (p.ptype) { 
+                                          LPortVIF{parent,_,tag} -> parent == p.id and tag == pkt.vlan.vid and p.enabled,
+                                          _ -> false
+                                      } ) {
             lport = p;
             pkt.vlan.vid = 0
         } default { drop }
