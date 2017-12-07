@@ -148,8 +148,10 @@ function isPktDAD(p: Packet): bool = {
 function portSecARP(lport: LogicalSwitchPort, p: Packet): bool = {
     the (psecarp in PortSecurityIP4Match | psecarp.lport == lport.id and 
                                            psecarp.mac == p.src and 
-                                           psecarp.mac == p.payload.arp.sha and 
-                                           ip4Match(p.payload.arp.spa, psecarp.subnet)) {
+                                           match (p.payload) {
+                                               EthARP{ARPPkt{_,spa,_,sha,_}} -> (psecarp.mac == sha) and ip4Match(spa, psecarp.subnet),
+                                               _                             -> false
+                                           } ) {
         true
     } default { false }
 }
@@ -184,7 +186,11 @@ procedure ingressConnTrack(lport : LogicalSwitchPort): () = {
         needCT = true
     } default { () };
 
-    the (lbvip in LPortLBVIP | lbvip.lport == lport.id and lbvip.vip.addr == pkt.payload.ip4.dst) {
+    the (lbvip in LPortLBVIP | lbvip.lport == lport.id and 
+                               match (pkt.payload) {
+                                   EthIP4{ip4} -> lbvip.vip.addr == ip4.dst,
+                                   _           -> false
+                               } ) {
         needCT = true
     } default { () };
 
@@ -257,12 +263,19 @@ procedure acl(lport : LogicalSwitchPort, dir : acl_dir_t) : (bool, bool) = {
  */
 procedure ingressLB(lport : LogicalSwitchPort, commit : bool) : () = {
     any (lb in LPortLBVIPIP | pkt.ct.new and 
-                              lb.lport == lport.id and 
-                              lb.proto == pkt.payload.ip4.proto and 
-                              lb.vip.addr == pkt.payload.ip4.dst and 
-                              ( (lb.proto == 6 and lb.vip.prt == pkt.payload.ip4.payload.tcp.dst) or
-                                (lb.proto == 17 and lb.vip.prt == pkt.payload.ip4.payload.udp.dst) or
-                                (lb.vip.prt == 0))) {
+                              lb.lport == lport.id and
+                              match(pkt.payload) { 
+                                  EthIP4{IP4Pkt{_,_,_,_,_,_,_,proto,_,dst,l4}} ->
+                                      lb.proto == proto and 
+                                      lb.vip.addr == dst and 
+                                      ( (lb.vip.prt == 0) or
+                                        match (l4) {
+                                              IPTCP{TCPPkt{_, dport, _}}    -> lb.vip.prt == dport,
+                                              IPUDP{UDPPkt{_, dport, _, _}} -> lb.vip.prt == dport,
+                                              _ -> false
+                                        } ),
+                                  _ -> false
+                              } ) {
         pkt.ct.commit = CTCommit { 0, 0, CTNATDNAT{IPAddr4{lb.ip.addr}, lb.ip.prt, CTHash} }
     } default {
         if (pkt.ct.est and (not pkt.ct.rel) and (not pkt.ct.new) and (not pkt.ct.inv)) {
