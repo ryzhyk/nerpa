@@ -426,9 +426,9 @@ structFields cs = nub $ concatMap consArgs cs
 structFieldConstructors :: [Constructor] -> String -> [Constructor]
 structFieldConstructors cs f = filter (isJust . find ((==f) . name) . consArgs) cs
 
--- True iff the field is defined in all constructors
+-- True iff the field is not defined in some constructors
 structFieldGuarded :: [Constructor] -> String -> Bool
-structFieldGuarded cs f = all (isJust . find ((==f) . name) . consArgs) cs
+structFieldGuarded cs f = any (isNothing . find ((==f) . name) . consArgs) cs
 
 structTypeDef :: Refine -> Type -> TypeDef
 structTypeDef r TStruct{..} = consType r $ name $ head typeCons

@@ -306,9 +306,9 @@ constraintValidate r rel constr = do
         parent _                  = Nothing
     let field  (E (EField _ _ f)) = f
         field  e                  = error $ "constraintValidate.field " ++ show e
-    let guarded (E (EField _ e f)) = let TStruct _ cs = exprType' r (CtxRelKey rel) e
-                                     in structFieldGuarded cs f || guarded e
-        guarded _                  = False
+    let unguarded (E (EField _ e f)) = let TStruct _ cs = exprType' r (CtxRelKey rel) e
+                                       in not (structFieldGuarded cs f) || unguarded e
+        unguarded _                  = False
     let oneconstr (TStruct _ [c])  = all (oneconstr . typ' r . fieldType) $ structFields [c]
         oneconstr (TStruct _ _)    = False
         oneconstr _                = True
@@ -328,7 +328,7 @@ constraintValidate r rel constr = do
                                                     matchType (pos e1) r t1 t2) $ zip constrFields constrFArgs
                               assertR r (relCheckKey frel constrFArgs) (pos constr)
                                       $ "Foreign fields do not form a primary key"
-         PrimaryKey{..} -> do mapM_ (\f -> assertR r (not $ guarded f) (pos f) 
+         PrimaryKey{..} -> do mapM_ (\f -> assertR r (not $ unguarded f) (pos f) 
                                                    "Primary key column only defined for some constructors") constrFields
                               mapM_ (\f -> assertR r (oneconstr $ exprType' r (CtxRelKey rel) f) (pos f) 
                                                    "Primary key must have a unique constructor") constrFields
