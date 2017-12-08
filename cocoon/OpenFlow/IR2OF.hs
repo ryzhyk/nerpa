@@ -263,12 +263,12 @@ mkAction val (I.ASet e1 e2) = O.ActionSet (mkExpr val e1) (mkExpr val e2)
 mkAction _   I.ABuiltin{}   = error "not implemented: IR2OF.mkAction ABuiltin"
 
 mkExpr :: I.Record -> I.Expr -> O.Expr
-mkExpr val e = 
+mkExpr val e = {-trace ("mkExpr " ++ show val ++ " " ++ show e) $ -}
     case e of
          I.EPktField f t   -> O.EField (O.Field f $ I.typeWidth t) Nothing
          I.EVar      v t   -> O.EField (O.Field v $ I.typeWidth t) Nothing
          I.ECol      c _   -> case M.lookup c val of
-                                   Nothing -> error $ "IR2OF.mkExpr: unknown column: " ++ show c
+                                   Nothing -> error $ "IR2OF.mkExpr: unknown column: " ++ show c ++ " in " ++ show val
                                    Just v  -> mkExpr val v
          I.ESlice    x h l -> slice (mkExpr val x) h l
          I.EBit      w v   -> O.EVal $ O.Value w v

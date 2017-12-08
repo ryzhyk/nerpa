@@ -113,7 +113,7 @@ compilePort' SwitchPort{..} = do
     (vars, asns) <- declAsnVar M.empty key (relRecordType rel) entrynd $ relCols rel
     pl <- get
     let c = eBinOp Eq (eField (eVar key) "portnum") (eField ePacket "portnum")
-    let (cdeps, cpl) = exprDeps vars (CtxFunc f CtxRefine) rel (vnameAt key entrynd) c pl
+    let (cdeps, cpl) = exprDeps vars (CtxFunc f CtxRefine) rel entrynd key c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxFunc f CtxRefine) Nothing e
     updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) I.First) [entryndb]
@@ -199,7 +199,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(EFork _ v t c b)) = do
     plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     pl <- get
-    let (cdeps, cpl) = exprDeps vars' (CtxForkCond e ctx) rel (vnameAt v entrynd) c pl
+    let (cdeps, cpl) = exprDeps vars' (CtxForkCond e ctx) rel entrynd v c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) exitnd b'
     updateNode entrynd (I.Fork t cdeps' cpl $ I.BB asns $ I.Goto entryndb) [entryndb]
@@ -270,7 +270,7 @@ compileQuery vars ctx entrynd exitnd (E e) = do
     plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     pl <- get
-    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) rel (vnameAt v entrynd) c pl
+    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) rel entrynd v c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
     let sel = case e of
@@ -285,21 +285,22 @@ compileQuery vars ctx entrynd exitnd (E e) = do
     return vars
 
 -- Compile boolean expression and determine its dependencies without changing compilation state
-exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> String -> Expr -> I.Pipeline -> ([I.VarName], I.FPipeline)
-exprDeps vars ctx rel relvar e pl = (deps, fpl)
+exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> I.NodeId -> String -> Expr -> I.Pipeline -> ([I.VarName], I.FPipeline)
+exprDeps vars ctx rel nd relvar e pl = (deps, fpl)
     where 
+    relprefix = vnameAt relvar nd
     fpl = \rec -> let e' = exprVarSubst (\vname -> if vname == relvar && rec /= eTuple [] then rec else eVar vname) id e
                       -- inline substituted lambda expressions
                       e'' = exprInline ?r (skipFuncs ?r) ctx e'
                       e''' = evalState (expr2Statement ?r ctx e'') 0 
                       (entry, pl') = runState (exprDeps' vars ctx e''') pl
                       -- isolate subgraph that computes e only
-                      cfg' = G.nfilter (\nd -> elem nd $ G.dfs [entry] (I.plCFG pl')) $ I.plCFG pl'
+                      cfg' = G.nfilter (\nd' -> elem nd' $ G.dfs [entry] (I.plCFG pl')) $ I.plCFG pl'
                       -- optimize to eliminate unused variables
                       pl'' = I.optimize (-1000) $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
                       -- substitute variable names with column names
                       cols = relCols rel
-                      relvs = map fst $ var2Scalars relvar (relRecordType rel)
+                      relvs = map fst $ var2Scalars relprefix (relRecordType rel)
                       pl''' = foldl' (\pl_ (v,c) -> I.plSubstVar v c pl_) pl'' (zip relvs cols)
                       -- columns occurring in the expression
                       ecols = nub $ concatMap I.nodeCols $ map snd $ G.labNodes $ I.plCFG pl'''
