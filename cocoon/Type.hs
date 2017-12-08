@@ -92,7 +92,9 @@ exprNodeType' _ _   (EBit _ w _)          = Just $ tBit w
 exprNodeType' r _   (EStruct _ c _)       = Just $ tUser $ name $ consType r c
 exprNodeType' _ _   (ETuple _ fs)         = fmap tTuple $ sequence fs
 exprNodeType' _ _   (ESlice _ _ h l)      = Just $ tBit $ h - l + 1
-exprNodeType' _ _   (EMatch _ _ cs)       = snd $ head cs
+exprNodeType' r _   (EMatch _ _ cs)       = case find ((\t -> isJust t && (typ' r (fromJust t) /= tSink)) . snd) cs of
+                                                 Nothing    -> snd $ head cs
+                                                 Just (_,t) -> t
 exprNodeType' r ctx (EVarDecl _ _)        = ctxExpectType r ctx
 exprNodeType' _ _   (ESeq _ _ e2)         = e2
 exprNodeType' _ _   (EPar _ _ _)          = Just tSink
