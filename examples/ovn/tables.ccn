@@ -851,6 +851,8 @@ typedef chassis_id_t = bit<64>
 
 table Chassis ( id     : chassis_id_t
               , failed : bool
+              , name   : string
+              , address: string
               , primary key (id) )
 
 typedef tunport_id_t = bit<64>
