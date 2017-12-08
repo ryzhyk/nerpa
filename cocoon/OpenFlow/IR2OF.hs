@@ -325,19 +325,22 @@ mkPLMatch I.Pipeline{..} =
     cs2expr []                       = I.EBool False 
 
 mkSimpleCond :: I.Expr -> [[O.Match]]
-mkSimpleCond c = 
+mkSimpleCond e = mkSimpleCond' $ I.exprEval e
+
+mkSimpleCond' :: I.Expr -> [[O.Match]]
+mkSimpleCond' c =
     case c of
          I.EBinOp Eq e1 e2 | not (I.exprIsBool e1) 
                                      -> mkMatch (mkExpr M.empty e1) (mkExpr M.empty e2)
-         I.EBinOp Neq e1 e2          -> mkSimpleCond (I.EUnOp Not (I.EBinOp Eq e1 e2))
-         I.EBinOp Impl e1 e2         -> mkSimpleCond (I.EBinOp Or (I.EUnOp Not e1) e2)
-         I.EBinOp Or e1 e2           -> mkSimpleCond e1 ++ mkSimpleCond e2
-         I.EBinOp And e1 e2          -> catMaybes $ concatMatches <$> mkSimpleCond e1 <*> mkSimpleCond e2
-         I.EUnOp Not (I.EBool b)     -> mkSimpleCond $ I.EBool (not b)
-         I.EUnOp Not (I.EUnOp Not e) -> mkSimpleCond e
+         I.EBinOp Neq e1 e2          -> mkSimpleCond' (I.EUnOp Not (I.EBinOp Eq e1 e2))
+         I.EBinOp Impl e1 e2         -> mkSimpleCond' (I.EBinOp Or (I.EUnOp Not e1) e2)
+         I.EBinOp Or e1 e2           -> mkSimpleCond' e1 ++ mkSimpleCond' e2
+         I.EBinOp And e1 e2          -> catMaybes $ concatMatches <$> mkSimpleCond' e1 <*> mkSimpleCond' e2
+         I.EUnOp Not (I.EBool b)     -> mkSimpleCond' $ I.EBool (not b)
+         I.EUnOp Not (I.EUnOp Not e) -> mkSimpleCond' e
          I.EBool False               -> []
          I.EBool True                -> [[]]
-         _                           -> error $ "IR2OF.mkPLMatch': expression is not supported: " ++ show c
+         _                           -> error $ "IR2OF.mkSimpleCond': expression is not supported: " ++ show c
 
 concatMatches :: [O.Match] -> [O.Match] -> Maybe [O.Match]
 concatMatches m1 m2 = foldM (\ms m@(O.Match f msk v) -> 

@@ -24,6 +24,7 @@ import qualified Data.Map             as M
 import qualified Data.Graph.Inductive as G 
 import qualified Data.GraphViz        as G
 import qualified Data.Set             as S
+import Data.Bits
 import Text.PrettyPrint
 import Data.Text.Lazy(unpack)
 import Data.List
@@ -108,23 +109,23 @@ exprType (EBool _)         = TBool
 exprType (EBit w _)        = TBit w
 exprType (EString _)       = TString
 exprType (EBinOp op e1 e2) = case op of
-                             Eq         -> TBool
-                             Neq        -> TBool
-                             Lt         -> TBool
-                             Gt         -> TBool
-                             Lte        -> TBool
-                             Gte        -> TBool
-                             And        -> TBool
-                             Or         -> TBool
-                             Impl       -> TBool
-                             Plus       -> exprType e1
-                             Minus      -> exprType e1
-                             Mod        -> exprType e2
-                             ShiftR     -> exprType e1
-                             ShiftL     -> exprType e1
-                             BAnd       -> exprType e1
-                             BOr        -> exprType e1
-                             Concat     -> TBit $ (typeWidth $ exprType e1) + (typeWidth $ exprType e2)
+                                 Eq         -> TBool
+                                 Neq        -> TBool
+                                 Lt         -> TBool
+                                 Gt         -> TBool
+                                 Lte        -> TBool
+                                 Gte        -> TBool
+                                 And        -> TBool
+                                 Or         -> TBool
+                                 Impl       -> TBool
+                                 Plus       -> exprType e1
+                                 Minus      -> exprType e1
+                                 Mod        -> exprType e1
+                                 ShiftR     -> exprType e1
+                                 ShiftL     -> exprType e1
+                                 BAnd       -> exprType e1
+                                 BOr        -> exprType e1
+                                 Concat     -> TBit $ (typeWidth $ exprType e1) + (typeWidth $ exprType e2)
 exprType (EUnOp Not _)     = TBool
 exprType (ELambda _ t)     = t
 
@@ -191,6 +192,70 @@ exprSubstVar v e' e = exprMap (\case
                                 EVar v' _ | v' == v -> e'
                                 x                   -> x) e
 
+exprIsConst :: Expr -> Bool
+exprIsConst EBit{}    = True
+exprIsConst EBool{}   = True
+exprIsConst EString{} = True
+exprIsConst _         = False
+
+-- Eval constant sub-expressions
+exprEval :: Expr -> Expr
+exprEval e@EPktField{}             = e
+exprEval e@EVar{}                  = e
+exprEval e@ECol{}                  = e
+exprEval   (ESlice e h l)          = case exprEval e of 
+                                          EBit w v -> EBit w (bitSlice v h l)
+                                          e'       -> ESlice e' h l
+exprEval e@EBool{}                 = e
+exprEval e@EBit{}                  = e
+exprEval e@EString{}               = e
+exprEval   (EBinOp op e1 e2)       = case op of
+                                         Eq      | c            -> EBool $ e1' == e2'
+                                                 | e1' == e2'   -> EBool True
+                                         Neq     | c            -> EBool $ e1' /= e2'
+                                                 | e1' == e2'   -> EBool False
+                                         Lt      | c            -> EBool $ i1 < i2
+                                         Gt      | c            -> EBool $ i1 > i2
+                                         Lte     | c            -> EBool $ i1 <= i2
+                                         Gte     | c            -> EBool $ i1 >= i2
+                                         And     | c            -> EBool $ b1 && b2
+                                                 | c1 && not b1 -> EBool False
+                                                 | c1 && b1     -> e2'
+                                                 | c2 && not b2 -> EBool False
+                                                 | c2 && b2     -> e1'
+                                         Or      | c            -> EBool $ b1 || b2
+                                                 | c1 && b1     -> EBool True
+                                                 | c1 && not b1 -> e2'
+                                                 | c2 && b2     -> EBool True
+                                                 | c2 && not b2 -> e1'
+                                         Impl    | c            -> EBool $ (not b1) || b2
+                                                 | c1 && b1     -> e2'
+                                                 | c1 && not b1 -> EBool True
+                                                 | c2 && b2     -> EBool True
+                                                 | c2 && not b2 -> EUnOp Not e1'                                                
+                                         Plus    | c            -> EBit w1 $ i1 + i2
+                                         Minus   | c            -> EBit w1 $ (i1 - i2) `mod` (1 `shiftL` w1)
+                                         Mod     | c            -> EBit w1 $ i1 `mod` i2
+                                         ShiftR  | c            -> EBit w1 $ i1 `shiftR` (fromIntegral i2)
+                                         ShiftL  | c            -> EBit w1 $ i1 `shiftL` (fromIntegral i2)
+                                         BAnd    | c            -> EBit w1 $ i1 .&. i2
+                                         BOr     | c            -> EBit w1 $ i1 .|. i2
+                                         Concat  | c            -> EBit (w1 + w2) $ ((i1 `shiftL` w2) + i2)
+                                         _                      -> e'
+    where e1' = exprEval e1
+          e2' = exprEval e2
+          c1  = exprIsConst e1'
+          c2  = exprIsConst e2'
+          EBit w1 i1  = e1'
+          EBit w2 i2  = e2'
+          EBool b1   = e1'
+          EBool b2   = e2'
+          c   = c1 && c2
+          e'  = EBinOp op e1' e2'
+exprEval   (EUnOp Not e)       = case exprEval e of
+                                      EBool b -> EBool $ not b
+                                      e'      -> EUnOp Not e'
+exprEval   (ELambda as t)      = ELambda (map exprEval as) t
 
 cfgSubstVar :: VarName -> Expr -> CFG -> CFG
 cfgSubstVar v e cfg = cfgMapCtx g f h cfg
