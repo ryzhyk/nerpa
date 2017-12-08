@@ -41,8 +41,8 @@ import Relation
 import Expr
 import Type
 
-refine2DL :: Refine -> ([SMT.Struct], [SMT.Function], [(Relation, ((DL.Relation, [DL.Rule]), [ [(DL.Relation, [DL.Rule])] ]))])
-refine2DL r = 
+refine2DL :: Bool -> Refine -> ([SMT.Struct], [SMT.Function], [(Relation, ((DL.Relation, [DL.Rule]), [ [(DL.Relation, [DL.Rule])] ]))])
+refine2DL noconstr r = 
     let ?r = r in
     let rels = refineRelsSorted r
         funcs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) rels
@@ -53,7 +53,7 @@ refine2DL r =
                              TStruct _ _ -> True
                              _           -> False) 
                   $ typeSort r $ nub $ concatMap (relTypes r) rels
-        dlrels = zip rels $ map rel2DL rels
+        dlrels = zip rels $ map ( (if noconstr then (\(rel,_) -> (rel,[])) else id)  . rel2DL) rels
     in ((SMT.Struct "__lambda" [SMT.Constructor "__Lambda" [SMT.Var "__lambda_string" SMT.TString]]): structs, funcs', dlrels)
 
 rel2DL :: (?r::Refine) => Relation -> ((DL.Relation, [DL.Rule]), [ [(DL.Relation, [DL.Rule])] ])

@@ -69,6 +69,7 @@ data ControllerState p = ControllerDisconnected { ctlWorkDir        :: FilePath
                                                 , ctlDFPath         :: FilePath
                                                 , ctlRefine         :: Refine
                                                 , ctlIR             :: p
+                                                , ctlNoConstraints  :: Bool
                                                 , ctlXactionLock    :: L.Lock
                                                 , ctlBackendRunning :: Bool
                                                 }
@@ -78,6 +79,7 @@ data ControllerState p = ControllerDisconnected { ctlWorkDir        :: FilePath
                                                 , ctlDFPath         :: FilePath
                                                 , ctlRefine         :: Refine
                                                 , ctlIR             :: p
+                                                , ctlNoConstraints  :: Bool
                                                 , ctlDL             :: DL.Session
                                                 , ctlConstraints    :: [(Relation, [DL.Relation])]
                                                 , ctlDB             :: PG.Connection
@@ -96,14 +98,14 @@ data Violation = Violation Relation Constraint DL.Fact
 instance Show Violation where
     show (Violation rel c f) = "row " ++ show f ++ " violates constraint " ++ show c ++ " on table " ++ name rel
 
-controllerStart :: FilePath -> Backend p -> String -> FilePath -> FilePath -> Int -> Refine -> p -> IO ()
-controllerStart workdir backend dbname dfpath logfile port r switches = do
+controllerStart :: FilePath -> Backend p -> String -> FilePath -> FilePath -> Int -> Bool -> Refine -> p -> IO ()
+controllerStart workdir backend dbname dfpath logfile port noConstr r switches = do
     let dopts = DaemonOptions{ daemonPort           = port
                              , daemonPidFile        = InHome
                              , printOnDaemonStarted = True}
     lock <- L.new
     xlock <- L.new
-    ref <- newIORef (Nothing, ControllerDisconnected workdir backend dbname dfpath r switches xlock False)
+    ref <- newIORef (Nothing, ControllerDisconnected workdir backend dbname dfpath r switches noConstr xlock False)
     ensureDaemonWithHandlerRunning "cocoon" dopts (controllerLoop lock ref logfile)
 
 controllerLoop :: L.Lock -> IORef (DaemonState p) -> FilePath -> Producer BS.ByteString IO () -> Consumer BS.ByteString IO () -> IO ()
@@ -229,10 +231,10 @@ connect ref = do
                 let ?r = ctlRefine
                 db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ ctlDBName
                 (do --runEffect $ lift (return $ BS.pack "Connected to database") >~ cons
-                    (dl, constr) <- startDLSession ctlDFPath
+                    (dl, constr) <- startDLSession ctlNoConstraints ctlDFPath
                     (do xsem  <- MV.newEmptyMVar
                         tsem  <- MV.newEmptyMVar
-                        let ?s = ControllerConnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR dl constr db False ctlXactionLock ctlBackendRunning xsem tsem (error "Controller: unexpected access to ctlSyncThread")
+                        let ?s = ControllerConnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR ctlNoConstraints dl constr db False ctlXactionLock ctlBackendRunning xsem tsem (error "Controller: unexpected access to ctlSyncThread")
                         populateDB
                         (do syncThr <- T.forkIO $ syncThread ?s
                             let s' = ?s{ctlSyncThread = syncThr}
@@ -263,7 +265,7 @@ disconnect ref = do
                 _ <- MV.takeMVar ctlTermSem
                 (closeDLSession ctlDL) `catch` \e -> error $ "failed to close Datalog session: " ++ show (e :: SomeException)
                 PG.close ctlDB `catch` \e -> error $ "DB disconnect error: " ++ show (e::SomeException)
-                writeIORef ref (mh, ControllerDisconnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR ctlXactionLock ctlBackendRunning)
+                writeIORef ref (mh, ControllerDisconnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR ctlNoConstraints ctlXactionLock ctlBackendRunning)
                 return "Disconnected"
         _ -> throw $ AssertionFailed "no active connection"
 
@@ -329,9 +331,9 @@ _rollback s = do
     DL.rollback ctlDL
     L.release ctlXactionLock
 
-startDLSession :: (?r::Refine) => FilePath -> IO (DL.Session, [(Relation, [DL.Relation])])
-startDLSession dfpath = do
-    let (structs, funcs, rels) = DL.refine2DL ?r
+startDLSession :: (?r::Refine) => Bool -> FilePath -> IO (DL.Session, [(Relation, [DL.Relation])])
+startDLSession noConstr dfpath = do
+    let (structs, funcs, rels) = DL.refine2DL noConstr ?r
     let (allrels, _) = unzip $ concatMap ( (\(mrel,crels) -> mrel:(concat crels)) . snd) rels
     dl <- DL.newSession dfpath structs funcs allrels
     return (dl, map (mapSnd (map (fst . last) . snd)) rels)

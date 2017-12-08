@@ -46,6 +46,7 @@ data TOption = CCN String
              | DoP4
              | DoNetKAT
              | Port String
+             | NoConstraints
         
 data CCNAction = ActionSQL 
                | ActionDL
@@ -56,34 +57,37 @@ data CCNAction = ActionSQL
                deriving Eq
 
 options :: [OptDescr TOption]
-options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Cocoon file"
-          , Option []    ["action"]     (ReqArg Action "ACTION")       "action: one of sql, dl, controller, cli, cmd"
-          , Option ['b'] ["bound"]      (ReqArg Bound "BOUND")         "integer bound on the number of hops"
-          , Option []    ["boogie"]     (NoArg DoBoogie)               "enable Boogie backend"
-          , Option []    ["1refinement"](NoArg Do1Refinement)          "generate Boogie encoding of one big refinement"
-          , Option []    ["p4"]         (NoArg DoP4)                   "enable P4 backend"
-          , Option []    ["netkat"]     (NoArg DoNetKAT)               "enable NetKAT backend"
-          , Option []    ["port"]       (ReqArg Port "PORT_NUMBER")    "cocoon controller port number, default: 5000"
+options = [ Option ['i'] []                 (ReqArg CCN "FILE")            "input Cocoon file"
+          , Option []    ["action"]         (ReqArg Action "ACTION")       "action: one of sql, dl, controller, cli, cmd"
+          , Option ['b'] ["bound"]          (ReqArg Bound "BOUND")         "integer bound on the number of hops"
+          , Option []    ["boogie"]         (NoArg DoBoogie)               "enable Boogie backend"
+          , Option []    ["1refinement"]    (NoArg Do1Refinement)          "generate Boogie encoding of one big refinement"
+          , Option []    ["p4"]             (NoArg DoP4)                   "enable P4 backend"
+          , Option []    ["netkat"]         (NoArg DoNetKAT)               "enable NetKAT backend"
+          , Option []    ["port"]           (ReqArg Port "PORT_NUMBER")    "cocoon controller port number, default: 5000"
+          , Option []    ["no-constraints"] (NoArg NoConstraints)          "disable constraint checking in datalog (UNSAFE)"
           ]
 
-data Config = Config { confCCNFile      :: FilePath
-                     , confAction       :: CCNAction
-                     , confBound        :: Int
-                     , confDoBoogie     :: Bool
-                     , confDo1Refinement:: Bool
-                     , confDoP4         :: Bool
-                     , confDoNetKAT     :: Bool
-                     , confCtlPort      :: Int
+data Config = Config { confCCNFile       :: FilePath
+                     , confAction        :: CCNAction
+                     , confBound         :: Int
+                     , confDoBoogie      :: Bool
+                     , confDo1Refinement :: Bool
+                     , confDoP4          :: Bool
+                     , confDoNetKAT      :: Bool
+                     , confCtlPort       :: Int
+                     , confNoConstraints :: Bool
                      }
 
-defaultConfig = Config { confCCNFile      = ""
-                       , confAction       = ActionNone
-                       , confBound        = 15
-                       , confDoBoogie     = False
-                       , confDo1Refinement= False
-                       , confDoP4         = False
-                       , confDoNetKAT     = False
-                       , confCtlPort      = 5000
+defaultConfig = Config { confCCNFile       = ""
+                       , confAction        = ActionNone
+                       , confBound         = 15
+                       , confDoBoogie      = False
+                       , confDo1Refinement = False
+                       , confDoP4          = False
+                       , confDoNetKAT      = False
+                       , confCtlPort       = 5000
+                       , confNoConstraints = False
                        }
 
 
@@ -109,6 +113,7 @@ addOption config (Port p)       = do p' <- case reads p of
                                                 []        -> error "invalid port number"
                                                 ((i,_):_) -> return i
                                      return config{confCtlPort = p'}
+addOption config NoConstraints  = return config{ confNoConstraints = True}
 
 validateConfig :: Config -> IO ()
 validateConfig Config{..} = do
@@ -148,7 +153,7 @@ main = do
              putStrLn $ "Schema written to file " ++ schfile
          ActionDL -> do
              combined <- readValidateAddDelta fname workdir
-             let (structs, funcs, rels) = DL.refine2DL combined
+             let (structs, funcs, rels) = DL.refine2DL (confNoConstraints config) combined
                  rels' = concatMap ((\(r,rs) -> map fst $ r:(concat rs)) . snd) rels
                  rules = concatMap ((\(r,rs) -> concatMap snd $ r:(concat rs)) . snd) rels
                  rust = DL.mkRust structs funcs rels' rules
@@ -187,7 +192,7 @@ main = do
                                       writeFile rdotname $ unpack $ IR.cfgToDot $ IR.plCFG reg) 
                    $ refinePortRoles combined -}
              putStrLn "Starting controller"
-             controllerStart workdir backend basename dfpath logfile (confCtlPort config) combined ir
+             controllerStart workdir backend basename dfpath logfile (confCtlPort config) (confNoConstraints config) combined ir
              controllerCLI histfile (confCtlPort config)
          ActionNone -> error "action not specified"
  

@@ -32,7 +32,7 @@ echo "Compiling $specname"
 $COCOON_PATH -i $ccnname --action=sql
 
 (set +x; echo Generating Datalog rules)
-$COCOON_PATH -i $ccnname --action=dl
+$COCOON_PATH -i $ccnname --action=dl --no-constraints
 
 if (( $# > 1 )) && [ $2 = "nodl" ];
 then
@@ -57,4 +57,4 @@ set -e
 sudo psql postgres -f $workdir/$specname.schema
 
 (set +x; echo Starting Cocoon controller)
-sudo $COCOON_PATH -i $ccnname --action=controller
+sudo $COCOON_PATH -i $ccnname --action=controller --no-constraints
