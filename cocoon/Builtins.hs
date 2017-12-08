@@ -148,6 +148,7 @@ ctfValidate1 _ _ _ _ e                     = error $ "Builtins.ctfValidate1 " ++
 ctfType :: String -> IR.Type -> Refine -> ECtx -> ExprNode (Maybe Type) -> Type
 ctfType _ IR.TBool    _ _ _ = tBool
 ctfType _ (IR.TBit w) _ _ _ = tBit w
+ctfType _ IR.TString  _ _ _ = tString
 
 ctfCompileExprAt :: String -> IR.Type -> StructReify -> Refine -> (M.Map String String) -> ECtx -> IR.NodeId -> Maybe IR.NodeId -> ENode -> State IR.Pipeline (M.Map String String)
 ctfCompileExprAt _ _ _ _ vars _ entrynd exitnd _ = IR.ignore vars entrynd exitnd

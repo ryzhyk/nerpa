@@ -404,6 +404,7 @@ mkExpr' _    _   (EBit _ w v)                        = I.ETLeaf $ I.EBit w v
 mkExpr' _    ctx (EInt _ v)                          = case typ' ?r $ exprType ?r ctx (eInt v) of    
                                                             TBit _ w -> I.ETLeaf $ I.EBit w v
                                                             _        -> error $ "Compile2IR.mkExpr' " ++ show v ++ " not a bitvector type"
+mkExpr' _    _   (EString _ s)                       = I.ETLeaf $ I.EString s
 mkExpr' _    _   (EStruct _ c fs)                    = I.ETNode $ tag ++ fls
     where t@(TypeDef _ _ (Just (TStruct _ cs))) = consType ?r c
           Constructor{..} = getConstructor ?r c

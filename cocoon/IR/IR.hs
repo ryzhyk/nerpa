@@ -45,15 +45,18 @@ type FieldName = String
 
 data Type = TBool
           | TBit Int
+          | TString
           deriving (Eq, Ord)
 
 typeWidth :: Type -> Int
 typeWidth TBool    = 1
 typeWidth (TBit w) = w
+typeWidth TString  = error "IR.typeWidth TString"
 
 instance PP Type where 
     pp TBool    = "bool"
     pp (TBit w) = "bit<" <> pp w <> ">"
+    pp TString  = "string"
 
 instance Show Type where
     show = render . pp
@@ -74,6 +77,7 @@ data Expr = EPktField {exprFieldName :: FieldName, exprT :: Type}
           | ESlice    {exprArg :: Expr, exprH :: Int, exprL :: Int}
           | EBool     {exprBoolVal :: Bool}
           | EBit      {exprWidth :: Int, exprIntVal :: Integer}
+          | EString   {exprString :: String}
           | EBinOp    {exprBOp :: BOp, exprArg1 :: Expr, exprArg2 :: Expr}
           | EUnOp     {exprUOp :: UOp, exprArg :: Expr}
           | ELambda   {exprArgs :: [Expr], exprLambdaType :: Type} -- only used when computing dependencies
@@ -87,6 +91,7 @@ instance PP Expr where
     pp (EBool True)      = "true" 
     pp (EBool False)     = "false" 
     pp (EBit w v)        = pp w <> "'d" <> pp v
+    pp (EString s)       = "\"" <> pp s <> "\""
     pp (EBinOp op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp op e)      = parens $ pp op <+> pp e
     pp (ELambda as t)    = parens $ "\\" <> parens (hcat $ punctuate comma $ map pp as)  <+> ":" <+> pp t
@@ -101,6 +106,7 @@ exprType (ECol _ t)        = t
 exprType (ESlice _ h l)    = TBit (h-l+1)
 exprType (EBool _)         = TBool   
 exprType (EBit w _)        = TBit w
+exprType (EString _)       = TString
 exprType (EBinOp op e1 e2) = case op of
                              Eq         -> TBool
                              Neq        -> TBool
@@ -132,6 +138,7 @@ exprMap f e@ECol{}            = f e
 exprMap f   (ESlice e h l)    = f $ ESlice (exprMap f e) h l
 exprMap f e@EBool{}           = f e
 exprMap f e@EBit{}            = f e
+exprMap f e@EString{}         = f e
 exprMap f   (EBinOp op e1 e2) = f $ EBinOp op (exprMap f e1) (exprMap f e2)
 exprMap f   (EUnOp op e)      = f $ EUnOp op $ exprMap f e
 exprMap f   (ELambda as t)    = f $ ELambda (map (exprMap f) as) t
@@ -145,6 +152,7 @@ exprVars' (ECol _ _)        = []
 exprVars' (ESlice e _ _)    = exprVars' e
 exprVars' (EBool _)         = []
 exprVars' (EBit _ _)        = []
+exprVars' (EString _)       = []
 exprVars' (EBinOp _ e1 e2)  = exprVars' e1 ++ exprVars' e2
 exprVars' (EUnOp _ e)       = exprVars' e
 exprVars' (ELambda as _)    = concatMap exprVars' as
@@ -159,6 +167,7 @@ exprCols' (ECol c _)        = [c]
 exprCols' (ESlice e _ _)    = exprCols' e
 exprCols' (EBool _)         = []
 exprCols' (EBit _ _)        = []
+exprCols' (EString _)       = []
 exprCols' (EBinOp _ e1 e2)  = exprCols' e1 ++ exprCols' e2
 exprCols' (EUnOp _ e)       = exprCols' e
 exprCols' (ELambda as _)    = concatMap exprCols' as
@@ -172,6 +181,7 @@ exprAtoms' e@ECol{}           = [e]
 exprAtoms'   (ESlice e _ _)   = exprAtoms' e
 exprAtoms'   EBool{}          = []
 exprAtoms'   EBit{}           = []
+exprAtoms'   EString{}        = []
 exprAtoms'   (EBinOp _ e1 e2) = exprAtoms' e1 ++ exprAtoms' e2
 exprAtoms'   (EUnOp _ e)      = exprAtoms' e
 exprAtoms'   (ELambda as _)   = concatMap exprAtoms' as
