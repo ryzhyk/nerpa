@@ -475,7 +475,7 @@ exprValidate1 r ctx (EVar p v)          = do _ <- checkVar p r ctx v
                                              return ()
 exprValidate1 r ctx (EPacket p)         = ctxCheckPkt p r ctx
 exprValidate1 r ctx e@(EBuiltin p f _)  = do fun <- checkBuiltin p f
-                                             (bfuncValidate fun) r ctx $ E e
+                                             (bfuncValidate1 fun) r ctx $ E e
 exprValidate1 r ctx (EApply p f as)     = do fun <- checkFunc p r f
                                              assertR r (length as == length (funcArgs fun)) p
                                                      "Number of arguments does not match function declaration"
@@ -547,6 +547,8 @@ checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p
 -- Traverse again with types.  This pass ensures that all sub-expressions
 -- have well-defined types that match their context
 exprValidate2 :: (MonadError String me) => Refine -> ECtx -> ExprNode Type -> me ()
+exprValidate2 r ctx e@(EBuiltin _ f _)  = do let fun = getBuiltin f
+                                             (bfuncValidate2 fun) r ctx e
 exprValidate2 r ctx (EField p e f)      = do case typ' r e of
                                                   t@TStruct{} -> assertR r (isJust $ find ((==f) . name) $ structArgs t) p
                                                                            $ "Unknown field \"" ++ f ++ "\" in struct of type " ++ show t 

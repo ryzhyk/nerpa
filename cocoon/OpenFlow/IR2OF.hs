@@ -260,6 +260,7 @@ mkBB pname pl nd i val (I.BB as n) = map (mkAction ival) as ++ mkNext pname pl n
 
 mkAction :: I.Record -> I.Action -> O.Action
 mkAction val (I.ASet e1 e2) = O.ActionSet (mkExpr val e1) (mkExpr val e2)
+mkAction _   I.ABuiltin{}   = error "not implemented: IR2OF.mkAction ABuiltin"
 
 mkExpr :: I.Record -> I.Expr -> O.Expr
 mkExpr val e = 

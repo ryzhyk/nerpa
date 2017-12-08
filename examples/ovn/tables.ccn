@@ -193,6 +193,7 @@ typedef opt_dhcp6_options_id_t = NoDHCP6Options
 
 // logical port id
 typedef lport_id_t = bit<64>
+typedef ct_zone_t = bit<16>
 
 table LogicalSwitchPort( id            : lport_id_t
                        , lswitch       : lswitch_id_t
@@ -202,7 +203,9 @@ table LogicalSwitchPort( id            : lport_id_t
                        , dhcp4_options : opt_dhcp4_options_id_t
                        , dhcp6_options : opt_dhcp6_options_id_t
                        , unknown_addr  : bool // true if packets with unknown destination should be sent to this port
+                       , ct_zone       : ct_zone_t
                        , primary key (id)
+                       , unique (ct_zone) // XXX: this only has to be unique per hypervisor
                        , foreign key (lswitch) references LogicalSwitch(id)
                        , foreign key (ptype.rport) references LogicalRouterPort(id) 
                        , foreign key (ptype.localnet) references PhysicalNetwork(id) 

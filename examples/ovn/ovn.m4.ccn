@@ -198,7 +198,7 @@ procedure ingressConnTrack(lport : LogicalSwitchPort): () = {
     } default { () };
 
     // sends the packet to connection tracker
-    pkt.ct.track = true
+    ct(lport.ct_zone)
 }
 
 /*
@@ -217,30 +217,30 @@ procedure ingressConnTrack(lport : LogicalSwitchPort): () = {
 */
 procedure acl(lport : LogicalSwitchPort, dir : acl_dir_t) : (bool, bool) = {
     // XXX: how to determine if the logical datapath has a stateful ACL
-    if (pkt.ct.inv) {
+    if (ct_inv()) {
         (false, false)
-    } else if ((not pkt.ct.new) and pkt.ct.rpl and (pkt.ct.commit.label[0:0] == 0)) {
+    } else if ((not ct_new()) and ct_rpl() and (ct_label()[0:0] == 0)) {
         (true, true)
-    } else if (pkt.ct.rel and (pkt.ct.commit.label[0:0] == 0)) {
+    } else if (ct_rel() and (ct_label()[0:0] == 0)) {
         (true, true)
-    } else if (pkt.ct.rpl and (pkt.ct.commit.label[0:0] == 1)) {
+    } else if (ct_rpl() and (ct_label()[0:0] == 1)) {
         (false, false)
     } else {
         the (acl in ACL | eval(acl.match_cond)(pkt) and acl.lswitch == lport.lswitch and acl.direction == dir) {
             match (acl.action) {
                 ACLAllow        -> (true, true),
                 ACLAllowRelated -> 
-                    if (pkt.ct.new) {
+                    if (ct_new()) {
                         (true, true)
                     } else {
-                        pkt.ct.commit = CTCommit{0,0,CTNATNone}; 
+                        ct_commit(lport.ct_zone, 128'd0); 
                         (true, false)
                     },
                 _               ->  
-                    if (pkt.ct.new) {
+                    if (ct_new()) {
                         (false, false)
                     } else {
-                        pkt.ct.commit = CTCommit{0,1,CTNATNone}; 
+                        ct_commit(lport.ct_zone, 128'd1); 
                         (false, false)
                     }
             }
@@ -265,7 +265,7 @@ procedure acl(lport : LogicalSwitchPort, dir : acl_dir_t) : (bool, bool) = {
     · A priority-0 flow that simply moves traffic to the next table.
  */
 procedure ingressLB(lport : LogicalSwitchPort, commit : bool) : () = {
-    any (lb in LPortLBVIPIP | pkt.ct.new and 
+    any (lb in LPortLBVIPIP | ct_new() and 
                               lb.lport == lport.id and
                               match(pkt.payload) { 
                                   EthIP4{IP4Pkt{_,_,_,_,_,_,_,proto,_,dst,l4}} ->
@@ -279,12 +279,12 @@ procedure ingressLB(lport : LogicalSwitchPort, commit : bool) : () = {
                                         } ),
                                   _ -> false
                               } ) {
-        pkt.ct.commit = CTCommit { 0, 0, CTNATDNAT{IPAddr4{lb.ip.addr}, lb.ip.prt, CTHash} }
+        ct_lb(lport.ct_zone, IPAddr4{lb.ip.addr}, lb.ip.prt)
     } default {
-        if (pkt.ct.est and (not pkt.ct.rel) and (not pkt.ct.new) and (not pkt.ct.inv)) {
-            pkt.ct.commit = CTCommit { 0, 0, CTNATDefault}
+        if (ct_est() and (not ct_rel()) and (not ct_new()) and (not ct_inv())) {
+            ct_lb(lport.ct_zone)
         } else if commit {
-            pkt.ct.commit = CTCommit { 0, 0, CTNATNone}
+            ct_commit(lport.ct_zone)
         } 
     }
 }
@@ -559,9 +559,9 @@ procedure lportEgress(lport: LogicalSwitchPort): sink = {
     if (not allowed) {
         drop
     } else if (lbcommit) {
-        pkt.ct.commit = CTCommit { 0, 0, CTNATDefault}
+        ct_lb(lport.ct_zone)
     } else if (aclcommit) {
-        pkt.ct.commit = CTCommit { 0, 0, CTNATNone}
+        ct_commit(lport.ct_zone)
     };
 
     if (not egressPortSecurity(lport, pkt)) drop;
@@ -584,11 +584,11 @@ procedure egressConnTrack(lport : LogicalSwitchPort): () = {
     } default { () };
 
     // sends the packet to connection tracker
-    pkt.ct.track = true
+    ct(lport.ct_zone)
 }
 
 procedure egressLB(lport : LogicalSwitchPort) : bool = {
-    pkt.ct.est and (not pkt.ct.rel) and (not pkt.ct.new) and (not pkt.ct.inv)
+    ct_est() and (not ct_rel()) and (not ct_new()) and (not ct_inv())
 }
 
 /*  

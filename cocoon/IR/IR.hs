@@ -193,6 +193,7 @@ cfgSubstVar v e cfg = cfgMapCtx g f h cfg
     f :: CFGCtx -> Maybe Action
     f ctx = case ctxAction cfg ctx of
                  ASet     l r  -> Just $ ASet (exprSubstVar v e l) (exprSubstVar v e r)
+                 ABuiltin b as -> Just $ ABuiltin b $ map (exprSubstVar v e) as
                  --APut     t es -> Just $ APut t (map (exprSubstVar v e) es)
                  --ADelete  t c  -> Just $ ADelete t $ exprSubstVar v e c
     h :: CFGCtx -> Next
@@ -230,12 +231,13 @@ type Delta = M.Map RelName [(Bool, C.Expr)]
 type DB    = M.Map RelName [C.Expr]
 
 data Action = ASet        Expr Expr
+            | ABuiltin String [Expr]
             -- | APut        String [Expr]
             -- | ADelete     String Expr
-            {-| ABuiltin String [Expr] -}
 
 instance PP Action where
     pp (ASet e1 e2)    = pp e1 <+> ":=" <+> pp e2
+    pp (ABuiltin b as) = pp b <> (parens $ hcat $ punctuate comma $ map pp as)
 --    pp (APut t vs)   = pp t <> ".put" <> (parens $ hsep $ punctuate comma $ map pp vs)
 --    pp (ADelete t c) = pp t <> ".delete" <> (parens $ pp c)
 
@@ -243,15 +245,18 @@ instance Show Action where
     show = render . pp
 
 actionVars :: Action -> [VarName]
-actionVars (ASet e1 e2)  = nub $ exprVars e1 ++ exprVars e2
+actionVars (ASet e1 e2)    = nub $ exprVars e1 ++ exprVars e2
+actionVars (ABuiltin _ as) = nub $ concatMap exprVars as
 --actionVars (APut _ vs)   = nub $ concatMap exprVars vs
 --actionVars (ADelete _ e) = exprVars e
 
 actionCols :: Action -> [VarName]
-actionCols (ASet e1 e2)  = nub $ exprCols e1 ++ exprCols e2
+actionCols (ASet e1 e2)    = nub $ exprCols e1 ++ exprCols e2
+actionCols (ABuiltin _ as) = nub $ concatMap exprCols as
 
 actionRHSVars :: Action -> [VarName]
-actionRHSVars (ASet _ e2)   = exprVars e2
+actionRHSVars (ASet _ e2)     = exprVars e2
+actionRHSVars (ABuiltin _ as) = nub $ concatMap exprVars as
 --actionRHSVars (APut _ vs)   = nub $ concatMap exprVars vs
 --actionRHSVars (ADelete _ c) = exprVars c
 
@@ -529,3 +534,17 @@ ctxLiveVars Pipeline{..} ctx = filter live $ M.keys plVars
     where 
     -- forward search for locations that use the variable, aborting when the variable is assigned
     live var = not $ null $ ctxSearchForward plCFG ctx (elem var . ctxRHSVars plCFG) (ctxAssignsFullVar plCFG var)
+
+-- Internal compiler data structures.  Exported here for use in
+-- Builtins.hs
+data ExprTree a = ETNode [(String, ExprTree a)] 
+                | ETLeaf a
+
+instance PP a => PP (ExprTree a) where
+    pp (ETLeaf x)  = pp x
+    pp (ETNode bs) = vcat $ map (\(n, t) -> pp n <> "-" <> pp t) bs
+
+instance PP a => Show (ExprTree a) where
+    show = render . pp
+
+
