@@ -543,11 +543,11 @@ procedure vSwitchEgress(local : bool, chassis: chassis_id_t, lswitch : lswitch_i
         }
     };
     the (lp in LogicalSwitchPort | lp.id == lport) {
-        lportEgress(lp)
+        lportEgress(lp, chassis)
     }
 }
 
-procedure lportEgress(lport: LogicalSwitchPort): sink = {
+procedure lportEgress(lport: LogicalSwitchPort, chassis : chassis_id_t): sink = {
     /* Run through connection tracker if needed */
     egressConnTrack(lport);
 
@@ -566,11 +566,28 @@ procedure lportEgress(lport: LogicalSwitchPort): sink = {
 
     if (not egressPortSecurity(lport, pkt)) drop;
 
-    deliver(lport)
+    deliver(lport, chassis)
 }
 
-procedure deliver(lport : LogicalSwitchPort): sink = {
-    drop
+procedure deliver(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
+    match (lport.ptype) {
+        LPortRouter{_}   -> drop, // XXX: TODO
+        _ -> ()
+    };
+
+    match (lport.ptype) {
+        LPortVIF{p,_,t}         -> {
+            pkt.vlan.vid = t;
+            the (vport in VSwitchPort | vport.lport == p and vport.switch == chassis) { 
+                send PVSwitchPort[vport].out 
+            }
+        },
+        _                       -> {
+            the (vport in VSwitchPort | vport.lport == lport.id and vport.switch == chassis) { 
+                send PVSwitchPort[vport].out 
+            }
+        }
+    }
 }
 
 procedure egressConnTrack(lport : LogicalSwitchPort): () = {
