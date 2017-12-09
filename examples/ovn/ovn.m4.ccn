@@ -357,7 +357,7 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
                         }
                     }
                 },
-                EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{target, sll}}}}}} -> {
+                EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{target, _}}}}}} -> {
                     the (lpaddr in LPortMACIP | lpaddr.lport == lport.id and lpaddr.ip == IPAddr6{target}) {
                         false
                     } default {
