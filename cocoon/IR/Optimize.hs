@@ -49,7 +49,8 @@ pass pl = do
     -- substitution optimization
     pl2 <- {-trace "optMergeCond" $-} fixpoint pl1 optMergeCond
     pl3 <- {-trace "optStraightLine" $-} fixpoint pl2 optStraightLine
-    return pl3
+    pl4 <- {-trace "optEntryNode" $-} fixpoint pl3 optEntryNode
+    return pl4
 
 fixpoint :: a -> (a -> State Bool a) -> State Bool a
 fixpoint x f = do
@@ -62,6 +63,16 @@ fixpoint x f = do
                return x''
        else return x'
 
+
+-- Eliminate trivial entry node
+optEntryNode :: Pipeline -> State Bool Pipeline
+optEntryNode pl@Pipeline{..} =
+    case G.lab plCFG plEntryNode of
+         Just (Par [BB [] (Goto n)]) -> do put True      
+                                           let (_, cfg') = G.match plEntryNode plCFG
+                                           return $ Pipeline plVars cfg' n
+         --Nothing                     -> trace (unsafePerformIO $ do {cfgDump plCFG "strange.dot"; return ""}) $ error "wtf"
+         _                           -> return pl
 
 -- Merge nodes that contain straight-line code with predecessors
 optStraightLine :: Pipeline -> State Bool Pipeline

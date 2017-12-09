@@ -317,7 +317,7 @@ mkPLMatch I.Pipeline{..} =
        then case G.lab plCFG plEntryNode of
                  Just (I.Cond cs) -> mkSimpleCond $ cs2expr cs
                  _                -> error $ "IR2OF.mkPLMatch: CFG too complicated:\n" ++ I.cfgToDot plCFG
-       else error $ "IR2OF.mkPLMatch: CFG too complicated (" ++ show (G.size plCFG) ++ " nodes):\n" ++ I.cfgToDot plCFG
+       else error $ "IR2OF.mkPLMatch: CFG too complicated (" ++ show (G.order plCFG) ++ " nodes):\n" ++ I.cfgToDot plCFG
     -- IR compiler encodes lookup conditions with satisfying branches terminating in Drop
     where
     cs2expr ((c, I.BB [] I.Drop):cs) = I.EBinOp Or c $ cs2expr cs
