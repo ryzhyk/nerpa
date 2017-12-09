@@ -339,31 +339,39 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
             match (pkt.payload) {
                 EthARP{ARPPkt{ARPRequest, spa, tpa, sha, tha}} -> {
                     // ignore requests for sender's own IP
-                    the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr4{tpa} and lpaddr.lport != lport.id) {
-                        pkt.dst = pkt.src;
-                        pkt.src = lpaddr.mac;
-                        pkt.payload.arp.op = ARPReply;
-                        pkt.payload.arp.tha = sha;
-                        pkt.payload.arp.sha = lpaddr.mac;
-                        pkt.payload.arp.spa = tpa;
-                        // XXX: what does this compile to?
-                        // flags.loopback = 1;
-                        true
-                    } default {
+                    the (lpaddr in LPortMACIP | lpaddr.lport == lport.id and lpaddr.ip == IPAddr4{tpa}) {
                         false
+                    } default {
+                        the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr4{tpa}) {
+                            pkt.dst = pkt.src;
+                            pkt.src = lpaddr.mac;
+                            pkt.payload.arp.op = ARPReply;
+                            pkt.payload.arp.tha = sha;
+                            pkt.payload.arp.sha = lpaddr.mac;
+                            pkt.payload.arp.spa = tpa;
+                            // XXX: what does this compile to?
+                            // flags.loopback = 1;
+                            true
+                        } default {
+                            false
+                        }
                     }
                 },
                 EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{target, sll}}}}}} -> {
-                    the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr6{target} and lpaddr.lport != lport.id) {
-                        pkt.dst = pkt.src;
-                        pkt.src = lpaddr.mac;
-                        pkt.payload.ip6.src = target;
-                        pkt.payload.ip6.payload.icmp6.payload = ICMP6NA{ICMP6NAPkt{target, lpaddr.mac}};
-                        // XXX: what does this compile to?
-                        // flags.loopback = 1;
-                        true
-                    } default {
+                    the (lpaddr in LPortMACIP | lpaddr.lport == lport.id and lpaddr.ip == IPAddr6{target}) {
                         false
+                    } default {
+                        the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr6{target}) {
+                            pkt.dst = pkt.src;
+                            pkt.src = lpaddr.mac;
+                            pkt.payload.ip6.src = target;
+                            pkt.payload.ip6.payload.icmp6.payload = ICMP6NA{ICMP6NAPkt{target, lpaddr.mac}};
+                            // XXX: what does this compile to?
+                            // flags.loopback = 1;
+                            true
+                        } default {
+                            false
+                        }
                     }
                 }
             }
