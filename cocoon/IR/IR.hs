@@ -132,6 +132,12 @@ exprType (ELambda _ t)     = t
 exprIsBool :: Expr -> Bool
 exprIsBool e = exprType e == TBool
 
+exprIsBit :: Expr -> Bool
+exprIsBit e = 
+    case exprType e of 
+         TBit _ -> True
+         _      -> False
+
 exprMap :: (Expr -> Expr) -> Expr -> Expr
 exprMap f e@EPktField{}       = f e
 exprMap f e@EVar{}            = f e

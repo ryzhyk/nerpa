@@ -295,10 +295,11 @@ mkCond ((c, a):cs) = mkCond' c [([], a)] $ mkCond cs
 
 mkCond' :: I.Expr -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])]
 mkCond' c yes no =
-    case c of
+    case I.exprEval c of
          I.EBinOp Eq e1 e2 | I.exprIsBool e1 
                                        -> mkCond' e1 (mkCond' e2 yes no) (mkCond' e2 no yes)
-                           | otherwise -> let cs' = mkMatch (mkExpr M.empty e1) (mkExpr M.empty e2)
+                           | I.exprIsBit e1
+                                       -> let cs' = mkMatch e1 e2
                                           in concatMap (\c' -> mapMaybe (\(m,a) -> fmap (,a) (concatMatches c' m)) yes) cs' ++ no
          I.EBinOp Neq e1 e2            -> mkCond' (I.EUnOp Not (I.EBinOp Eq e1 e2)) yes no
          I.EBinOp Impl e1 e2           -> mkCond' (I.EBinOp Or (I.EUnOp Not e1) e2) yes no
@@ -330,8 +331,8 @@ mkSimpleCond e = mkSimpleCond' $ I.exprEval e
 mkSimpleCond' :: I.Expr -> [[O.Match]]
 mkSimpleCond' c =
     case c of
-         I.EBinOp Eq e1 e2 | not (I.exprIsBool e1) 
-                                     -> mkMatch (mkExpr M.empty e1) (mkExpr M.empty e2)
+         I.EBinOp Eq e1 e2 | I.exprIsBit e1
+                                     -> mkMatch e1 e2
          I.EBinOp Neq e1 e2          -> mkSimpleCond' (I.EUnOp Not (I.EBinOp Eq e1 e2))
          I.EBinOp Impl e1 e2         -> mkSimpleCond' (I.EBinOp Or (I.EUnOp Not e1) e2)
          I.EBinOp Or e1 e2           -> mkSimpleCond' e1 ++ mkSimpleCond' e2
@@ -359,21 +360,33 @@ combineMatches f (mm1, v1) (mm2, v2) = if v1' == v2' then Just (O.Match f m' v')
           m' = if m1 .|. m2 == -1 then Nothing else Just (m1 .|. m2)
           v' = (v1 .&. m1) .|. (v2 .&. m2)
 
-mkMatch :: O.Expr -> O.Expr -> [[O.Match]]
-mkMatch e1 e2 | const1 && const2 && v1 == v2 = [[]]
-              | const1 && const2 && v1 /= v2 = []
-              | const1                       = mkMatch e2 e1
-              | const2                       = [[O.Match f (slice2mask sl) (O.valVal v2 `shiftL` l)]]
-              | otherwise                    = error $ "IR2OF.mkMatch: cannot match two variables: " ++ show e1 ++ " " ++ show e2
-    where
-    const1 = O.exprIsConst e1
-    const2 = O.exprIsConst e2
-    (O.EVal v1) = e1
-    (O.EVal v2) = e2
-    (O.EField f sl) = e1
-    l = maybe 0 snd sl
-    slice2mask :: Maybe (Int, Int) -> Maybe O.Mask
-    slice2mask msl = fmap (uncurry bitRange) msl
+mkMatch :: I.Expr -> I.Expr -> [[O.Match]]
+mkMatch e1 e2 = 
+    if I.exprIsConst e1 
+       then mkMatch' e2' mask2 i1'
+       else if I.exprIsConst e2
+               then mkMatch' e1' mask1 i2'
+               else error $ "IR2OF.mkMatch: cannot match two variables expressions: " ++ show e1 ++ " " ++ show e2
+    where (e1', mask1, i2') = exprMask e1 (bitRange (I.typeWidth (I.exprType e1) - 1) 0) i2
+          (e2', mask2, i1') = exprMask e2 (bitRange (I.typeWidth (I.exprType e2) - 1) 0) i1
+          I.EBit _ i1 = e1
+          I.EBit _ i2 = e2
+
+mkMatch' :: O.Field -> Integer -> Integer -> [[O.Match]]
+mkMatch' _ mask val | (val .&. (complement mask)) /= 0        = []
+mkMatch' _ mask _   | mask == 0                               = [[]]
+mkMatch' f mask val | mask == bitRange (O.fieldWidth f - 1) 0 = [[O.Match f Nothing val]]
+mkMatch' f mask val | otherwise                               = [[O.Match f (Just mask) val]]
+
+exprMask :: I.Expr -> Integer -> Integer -> (O.Field, Integer, Integer)
+exprMask (I.EPktField f t)     m i = (O.Field f $ I.typeWidth t, m, i)
+exprMask (I.EVar v t)          m i = (O.Field v $ I.typeWidth t, m, i)
+exprMask (I.ESlice e h l)      m i = exprMask e ((m `shiftL` l) .&. bitRange h l) (i `shiftL` l)
+exprMask (I.EBinOp BAnd e1 e2) m i | I.exprIsConst e1 
+                                   = exprMask e2 (m .&. I.exprIntVal e1) i
+exprMask (I.EBinOp BAnd e1 e2) m i | I.exprIsConst e2
+                                   = exprMask e1 (m .&. I.exprIntVal e2) i
+exprMask e                     _ _ = error $ "IR2OF.exprMask: expression too complicated " ++ show e
 
 mkNext :: (?r::C.Refine) => String -> I.Pipeline -> I.NodeId -> Int -> I.Record -> I.Next -> [O.Action]
 mkNext _ pl _  _ _ (I.Goto nd)        = [mkGoto pl nd]
