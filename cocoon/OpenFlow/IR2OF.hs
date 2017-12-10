@@ -47,7 +47,6 @@ import qualified OpenFlow.OpenFlow as O
 import qualified Backend           as B
 import qualified Syntax            as C -- Cocoon
 import qualified Eval              as C
-import qualified Relation          as C
 import qualified NS                as C
 
 -- Uniquely identify an instance of the switch:
@@ -62,7 +61,8 @@ maxOFTables = 255
 -- generated for any-queries.  Maps a set of columns in a relation to
 -- the set of valuations of this column in the database, the number of times 
 -- each valuation occurs and the group number assigned to it.
-type SwRuntimeState = M.Map (I.RelName, [I.ColName]) (M.Map [I.Expr] (O.GroupId, M.Map I.Record O.BucketId))
+type NodeRuntimeState = M.Map [I.Expr] (O.GroupId, M.Map I.Record O.BucketId)
+type SwRuntimeState = (M.Map I.NodeId NodeRuntimeState, O.GroupId)
 type Groups = M.Map SwitchId SwRuntimeState
 
 type RuntimeState = Groups
@@ -113,14 +113,14 @@ buildSwitch r structs s ports db swid = (table0 : (staticcmds ++ updcmds), s')
     -- Configure static part of the pipeline
     staticcmds = let ?r = r 
                      ?structs = structs
-                 in concatMap (\(pname, pl) -> concatMap (mkNode pname pl) $ G.labNodes $ I.plCFG pl) ports
+                 in concatMap (\(pname, pl) -> concatMap (mkNode pname) $ G.labNodes $ I.plCFG pl) ports
     -- Configure dynamic part from primary tables
-    (updcmds, s') = updateSwitch r structs (M.insert swid M.empty s) ports swid (M.map (map (True,)) db)
+    (updcmds, s') = updateSwitch r structs (M.insert swid (M.empty,0) s) ports swid (M.map (map (True,)) db)
 
 updateSwitch :: C.Refine -> B.StructReify -> RuntimeState -> IRSwitch -> SwitchId -> I.Delta -> ([O.Command], RuntimeState)
 updateSwitch r structs s ports swid db = (portcmds ++ nodecmds, M.insert swid ssw' s')
     where
-    s' = M.alter (Just . maybe M.empty id) swid s
+    s' = M.alter (Just . maybe (M.empty,0) id) swid s
     -- update table0 if ports have been added or removed
     portcmds = let ?r = r 
                    ?structs = structs
@@ -141,17 +141,17 @@ updatePort pname pl i db = delcmd ++ addcmd
     match f = let C.E (C.EBit _ w pnum) = C.evalConstExpr ?r (C.eField f "portnum") in
               mkSimpleCond $ I.EBinOp Eq (I.EPktField "portnum" $ I.TBit w) (I.EBit w pnum)
     delcmd = concatMap (\(_,f) -> map (O.DelFlow 0 1) $ match f) del
-    addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [mkGoto pl $ I.plEntryNode pl]) $ match f) add
+    addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [O.ActionGoto $ I.plEntryNode pl]) $ match f) add
 
-mkNode :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
-mkNode pname pl (nd, node) = 
+mkNode :: (?r::C.Refine, ?structs::B.StructReify) => String -> (I.NodeId, I.Node) -> [O.Command]
+mkNode pname (nd, node) = 
     case node of
-         I.Par bs                    -> [ O.AddGroup $ O.Group nd O.GroupAll $ mapIdx (\b i -> O.Bucket Nothing $ mkStaticBB pname pl nd i b) bs 
+         I.Par bs                    -> [ O.AddGroup $ O.Group nd O.GroupAll $ mapIdx (\b i -> O.Bucket Nothing $ mkStaticBB pname nd i b) bs 
                                         , O.AddFlow nd $ O.Flow 0 [] [O.ActionGroup nd] ]
-         I.Cond cs                   -> map (\(m, a) -> O.AddFlow nd $ O.Flow 0 m a) $ mkCond $ mapIdx (\(c,b) i -> (c, mkStaticBB pname pl nd i b)) cs
-         I.Lookup _ _ _ _ el I.First -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pname pl nd 1 el]
-         I.Lookup _ _ _ _ el I.Rand  -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pname pl nd 1 el]
-         I.Fork{}                    -> [O.AddGroup $ O.Group nd O.GroupAll []]
+         I.Cond cs                   -> map (\(m, a) -> O.AddFlow nd $ O.Flow 0 m a) $ mkCond $ mapIdx (\(c,b) i -> (c, mkStaticBB pname nd i b)) cs
+         I.Lookup _ _ _ _ el I.First -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pname nd 1 el]
+         I.Lookup _ _ _ _ el I.Rand  -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pname nd 1 el]
+         I.Fork{}                    -> []
 
 updateNode :: (?r::C.Refine, ?structs::B.StructReify) => I.Delta -> String -> I.Pipeline -> SwitchId -> (I.NodeId, I.Node) -> State SwRuntimeState [O.Command]
 updateNode db pname portpl swid (nd, node) = 
@@ -164,85 +164,102 @@ updateNode db pname portpl swid (nd, node) =
                                                              then partition fst $ filter (\(_, f) -> (C.exprIVal $ C.enode $ (C.evalConstExpr ?r (C.eField f "switch"))) == swid) $ (db M.! t)
                                                              else partition fst (db M.! t) 
                                              delcmd = concatMap (\(_,f) -> map (\O.Flow{..} -> O.DelFlow nd flowPriority flowMatch) 
-                                                                               $ mkLookupFlow pname portpl nd f pl $ Left th) del
-                                             addcmd = concatMap (\(_,f) -> map (O.AddFlow nd) $ mkLookupFlow pname portpl nd f pl $ Left th) add
+                                                                               $ mkLookupFlow pname nd f pl $ Left th) del
+                                             addcmd = concatMap (\(_,f) -> map (O.AddFlow nd) $ mkLookupFlow pname nd f pl $ Left th) add
                                          in return $ delcmd ++ addcmd
          I.Lookup t _ _ _ _ I.Rand    -> -- create a group for each unique combination of match columns
                                          -- create match entries in the table to forward packets to the group
                                          -- create a bucket in the group for each row in relation
                                          do let (add, del) = partition fst (db M.! t)
-                                            delgrcmd <- liftM concat $ mapM (delGroup node . snd) del
-                                            addgrcmd <- liftM concat $ mapM (addGroup node . snd) add
+                                            delgrcmd <- liftM concat $ mapM (delGroup . snd) del
+                                            addgrcmd <- liftM concat $ mapM (addGroup O.GroupSelect . snd) add
                                             return $ delgrcmd ++ addgrcmd
-         I.Fork t _ _ b               -> -- TODO: re-implement Fork using the same mechanism as in Lookup Rand above
-                                         -- create a bucket for each table row
-                                         let (add, del) = partition fst (db M.! t) 
-                                             delcmd = map (\(_,f) -> O.DelBucket nd $ getBucketId t f) del
-                                             addcmd = map (\(_,f) -> O.AddBucket nd $ O.Bucket (Just $ getBucketId t f) $ mkBB pname portpl nd 0 f b) add
-                                         in return $ delcmd ++ addcmd
+         I.Fork t _ _ _               -> do let (add, del) = partition fst (db M.! t)
+                                            delgrcmd <- liftM concat $ mapM (delGroup . snd) del
+                                            addgrcmd <- liftM concat $ mapM (addGroup O.GroupAll . snd) add
+                                            return $ delgrcmd ++ addgrcmd
     where
-    delGroup :: I.Node -> C.Expr -> State SwRuntimeState [O.Command]
-    delGroup (I.Lookup t _ fpl _ _ _) f = do
-        (s::SwRuntimeState) <- get
-        let (cols, _) = fpl f
-        let f' = I.val2Record ?r ?structs t f
+    delGroup :: C.Expr -> State SwRuntimeState [O.Command]
+    delGroup f = do
+        s <- getNode nd
+        let (cols, _) = I.nodePL node f
+        let f' = I.val2Record ?r ?structs (I.nodeRel node) f
         -- extract column values from f
         let vals = map (f' M.!) cols
-        let (g, bkts) = s M.! (t,cols) M.! vals
+        let (g, bkts) = s M.! vals
         let bid = bkts M.! f'
         let bkts' = M.delete f' bkts
-        -- update counter in s M.! (rel, cols) M.! val; if the counter drops to 0, delete group and flow entries
-        let s' = M.update (Just . M.update (\(gid, _) -> Just (gid, bkts')) vals) (t, cols) s
+        -- update counter in s M.! val; if the counter drops to 0, delete group and flow entries
+        let s' = M.update (\(gid, _) -> Just (gid, bkts')) vals s
         let grcmds = if M.size bkts' == 0
                         then (O.DelGroup g) :
                              (map (\O.Flow{..} -> O.DelFlow nd flowPriority flowMatch)
-                                  $ mkLookupFlow pname portpl nd f fpl $ Right [O.ActionGroup g])
+                                  $ mkLookupFlow pname nd f (I.nodePL node) $ Right [O.ActionGroup g])
                         else []
         -- remove empty group
-        let s'' = M.update (\m -> let m' = M.update (\(gid,_) -> if M.size bkts' == 0 then Nothing else Just (gid, bkts')) vals m
-                                  in if M.size m' == 0 then Nothing else Just m') (t, cols) s'
-        put s''
+        s'' <- if M.size bkts' == 0
+                  then do deallocGroup g
+                          return $ M.delete vals s'
+                  else return s'
+        putNode nd s''
         let delcmd = O.DelBucket g bid
         return $ grcmds ++ [delcmd]
-    delGroup _ _ = error "IR2OF.delGroup: unexpected argument"
 
-    addGroup :: I.Node -> C.Expr -> State SwRuntimeState [O.Command]
-    addGroup (I.Lookup t _ fpl th _ _) f = do
-        s <- get
-        let (cols, pl) = fpl f
-        let f' = I.val2Record ?r ?structs t f
+    addGroup :: O.GroupType -> C.Expr -> State SwRuntimeState [O.Command]
+    addGroup gt f = do
+        let bb = case node of
+                      I.Lookup _ _ _ th _ _ -> th
+                      I.Fork _ _ _ b        -> b
+                      _                     -> error $ "IR2OF.addGroup " ++ show node
+        s <- getNode nd
+        let (cols, _) = I.nodePL node f
+        let f' = I.val2Record ?r ?structs (I.nodeRel node) f
         -- extract column values from f
         let vals = map (f' M.!) cols
-        -- allocate group number if needed (simply increment the biggest group number by 1)
-        -- TODO: proper allocator
-        let newg = case concatMap (map fst . M.elems) $ M.elems s of
-                        [] -> maxOFTables + 1 
-                        gs -> maximum gs + 1
-        -- update counter in s M.! (rel, cols) M.! val; if the counter is 1 (1st element), create group and flow entries
-        let s' = M.alter (maybe (Just $ M.singleton vals (newg, M.empty)) 
-                                (Just . (M.alter (maybe (Just (newg, M.empty)) (Just . id)) vals)))
-                         (t, cols) s
-        let g =fst $ s' M.! (t,cols) M.! vals
-        let grcmds = if M.size (snd $ s' M.! (t,cols) M.! vals) == 0
-                        then (O.AddGroup $ O.Group g O.GroupSelect []) :
-                             (map (O.AddFlow nd) $ mkLookupFlow pname portpl nd f fpl $ Right [O.ActionGroup g])
+        -- update counter in s M.! val; if the counter is 1 (1st element), create group and flow entries
+        s' <- case M.lookup vals s of
+                   Nothing -> do newg <- allocGroup
+                                 return $ M.insert vals (newg, M.empty) s
+                   Just _  -> return s
+        let g = fst $ s' M.! vals
+        let grcmds = if M.size (snd $ s' M.! vals) == 0
+                        then (O.AddGroup $ O.Group g gt []) :
+                             (map (O.AddFlow nd) $ mkLookupFlow pname nd f (I.nodePL node) $ Right [O.ActionGroup g])
                         else []
         -- allocate bucket id
-        let bid = case M.elems $ snd $ s' M.! (t,cols) M.! vals of
+        let bid = case M.elems $ snd $ s' M.! vals of
                        []    -> 0
                        bids  -> maximum bids + 1
-        let s'' = M.update (Just . M.update (\(gid,bkts) -> Just (gid, M.insert f' bid bkts)) vals) (t, cols) s'
-        let addcmd = O.AddBucket g $ O.Bucket (Just bid) $ mkBB pname pl nd 0 f th
-        put s''
+        let s'' = M.update (\(gid,bkts) -> Just (gid, M.insert f' bid bkts)) vals s'
+        let addcmd = O.AddBucket g $ O.Bucket (Just bid) $ mkBB pname nd 0 f bb
+        putNode nd s''
         return $ grcmds ++ [addcmd]
-    addGroup _ _ = error "IR2OF.addGroup: unexpected argument"
 
+    -- Group id allocator -- just keep incrementing for now
+    -- TODO: implement real allocator
+    allocGroup :: State SwRuntimeState O.GroupId
+    allocGroup = do
+        lastGroup <- gets snd
+        let g = lastGroup + 1
+        modify (\(x, _) -> (x, g))
+        return g
+
+    deallocGroup :: O.GroupId -> State SwRuntimeState ()
+    deallocGroup _ = return ()
+
+    getNode :: I.NodeId -> State SwRuntimeState NodeRuntimeState
+    getNode n = gets ((maybe M.empty id) . M.lookup n . fst)
+
+    putNode :: I.NodeId -> NodeRuntimeState -> State SwRuntimeState ()
+    putNode n s = modify (\(m, g) -> (M.insert n s m, g))
+
+{-
 getBucketId :: (?r::C.Refine) => String -> C.Expr -> O.BucketId
 getBucketId rname f = fromInteger pkey
     where   
     rel = C.getRelation ?r rname
     Just [key] = C.relPrimaryKey rel
-    C.E (C.EBit _ _ pkey) = recordField f key
+    C.E (C.EBit _ _ pkey) = recordField f key -}
 
 recordField :: (?r::C.Refine) => C.Expr -> C.Expr -> C.Expr
 recordField rec fexpr = C.evalConstExpr ?r (f fexpr)
@@ -251,11 +268,11 @@ recordField rec fexpr = C.evalConstExpr ?r (f fexpr)
     f (C.E (C.EField _ e fl)) = C.eField (f e) fl
     f e                       = error $ "IR2OF.recordField.f " ++ show e
 
-mkStaticBB :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.Pipeline -> I.NodeId -> Int -> I.BB -> [O.Action]
-mkStaticBB pname pl nd i b = mkBB pname pl nd i (error "IR2OF.mkStaticBB requesting field value") b
+mkStaticBB :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.NodeId -> Int -> I.BB -> [O.Action]
+mkStaticBB pname nd i b = mkBB pname nd i (error "IR2OF.mkStaticBB requesting field value") b
 
-mkBB :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.Pipeline -> I.NodeId -> Int -> C.Expr -> I.BB -> [O.Action]
-mkBB pname pl nd i val (I.BB as n) = map (mkAction ival) as ++ mkNext pname pl nd i ival n
+mkBB :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.NodeId -> Int -> C.Expr -> I.BB -> [O.Action]
+mkBB pname nd i val (I.BB as n) = map (mkAction ival) as ++ mkNext pname nd i ival n
     where ival = I.val2Record ?r ?structs (C.exprConstructor $ C.enode val) val
 
 mkAction :: I.Record -> I.Action -> O.Action
@@ -281,12 +298,12 @@ slice (O.EField f Nothing)       h l = O.EField f $ Just (h, l)
 slice (O.EField f (Just (_,l0))) h l = O.EField f $ Just (l0+h, l0+l)
 slice (O.EVal (O.Value _ v))     h l = O.EVal $ O.Value (h-l) $ bitSlice v h l
 
-mkLookupFlow :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.Pipeline -> I.NodeId -> C.Expr -> I.FPipeline -> Either I.BB [O.Action] -> [O.Flow]
-mkLookupFlow pname pl nd val lpl b = map (\m -> O.Flow 1 m as) matches
+mkLookupFlow :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.NodeId -> C.Expr -> I.FPipeline -> Either I.BB [O.Action] -> [O.Flow]
+mkLookupFlow pname nd val lpl b = map (\m -> O.Flow 1 m as) matches
     where
     matches = mkPLMatch (snd $ lpl val)
     as = case b of 
-              Left bb    -> mkBB pname pl nd 0 val bb
+              Left bb    -> mkBB pname nd 0 val bb
               Right acts -> acts
     
 mkCond :: [(I.Expr, [O.Action])] -> [([O.Match], [O.Action])]
@@ -388,18 +405,18 @@ exprMask (I.EBinOp BAnd e1 e2) m i | I.exprIsConst e2
                                    = exprMask e1 (m .&. I.exprIntVal e2) i
 exprMask e                     _ _ = error $ "IR2OF.exprMask: expression too complicated " ++ show e
 
-mkNext :: (?r::C.Refine) => String -> I.Pipeline -> I.NodeId -> Int -> I.Record -> I.Next -> [O.Action]
-mkNext _ pl _  _ _ (I.Goto nd)        = [mkGoto pl nd]
-mkNext _ _  _  _ r (I.Send e)         = [O.ActionOutput $ mkExpr r e]
-mkNext _ _  _  _ _ I.Drop             = [O.ActionDrop]
-mkNext n _  nd i _ (I.Controller _ _) = [ O.ActionSet (O.EField (O.Field "metadata" 64) Nothing) 
+mkNext :: (?r::C.Refine) => String -> I.NodeId -> Int -> I.Record -> I.Next -> [O.Action]
+mkNext _ _  _ _ (I.Goto nd)        = [O.ActionGoto nd]
+mkNext _ _  _ r (I.Send e)         = [O.ActionOutput $ mkExpr r e]
+mkNext _ _  _ _ I.Drop             = [O.ActionDrop]
+mkNext n nd i _ (I.Controller _ _) = [ O.ActionSet (O.EField (O.Field "metadata" 64) Nothing) 
                                                       (O.EVal $ O.Value 64 $ ((toInteger portnum) `shiftL` 48) + ((toInteger nd) `shiftL` 16) + toInteger i)
                                         , O.ActionController]
     where portnum = fromJust $ findIndex ((== n) . name) $ C.refinePorts ?r
     
 
-mkGoto :: I.Pipeline -> I.NodeId -> O.Action
-mkGoto pl nd = 
-    case G.lab (I.plCFG pl) nd of
-         Just (I.Fork{}) -> O.ActionGroup nd
-         _               -> O.ActionGoto nd 
+--mkGoto :: I.Pipeline -> I.NodeId -> O.Action
+--mkGoto pl nd = 
+--    case G.lab (I.plCFG pl) nd of
+--         Just (I.Fork{}) -> O.ActionGroup nd
+--         _               -> O.ActionGoto nd 
