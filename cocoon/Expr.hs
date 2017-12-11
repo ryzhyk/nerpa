@@ -417,6 +417,8 @@ exprInline' r skip ctx e@(EApply _ f as) | elem f skip    = E e
                          Just i  -> as !! i
                          Nothing -> eVar $ f ++ ":" ++ v
           vsubst v = f ++ ":" ++ v
+exprInline' r skip ctx (EField _ (E (EStruct _ c fs)) f) = exprInline r skip ctx v
+    where v = fs !! (fromJust $ findIndex ((== f) . name) $ consArgs $ getConstructor r c)
 exprInline' r skip ctx e@(EApplyLambda _ (E e'@(ELambda _ as' _ e'')) as) = exprVarSubst subst vsubst body
     where body = exprInline r skip (CtxLambda e' (CtxApplyLambda e ctx)) e''
           -- rename local vars; substitute arguments
