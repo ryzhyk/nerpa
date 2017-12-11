@@ -299,7 +299,7 @@ slice (O.EField f (Just (_,l0))) h l = O.EField f $ Just (l0+h, l0+l)
 slice (O.EVal (O.Value _ v))     h l = O.EVal $ O.Value (h-l) $ bitSlice v h l
 
 mkLookupFlow :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.NodeId -> C.Expr -> I.FPipeline -> Either I.BB [O.Action] -> [O.Flow]
-mkLookupFlow pname nd val lpl b = map (\m -> O.Flow 1 m as) matches
+mkLookupFlow pname nd val lpl b = {-trace ("mkLookupFlow " ++ show val ++ " " ++ show (I.plCFG $ snd $ lpl val)) $-} map (\m -> O.Flow 1 m as) matches
     where
     matches = mkPLMatch (snd $ lpl val)
     as = case b of 

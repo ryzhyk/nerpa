@@ -425,6 +425,7 @@ mkExpr' _   _   (EBinOp _ Neq t1 t2)                = I.ETLeaf $ I.disj
 mkExpr' _   _   (EUnOp _ op (I.ETLeaf e))             = I.ETLeaf $ I.EUnOp op e
 mkExpr' _   _   (ETyped _ e _)                      = e
 mkExpr' _   ctx EAnon{}                             = fields "" (exprType ?r ctx eAnon) $ flip I.ECol
+mkExpr' _   _   ELambda{}                           = I.ETNode []
 mkExpr' _   _   e                                   = error $ "Compile2IR.mkExpr' " ++ show e
 
 (.+) :: String -> String -> String
