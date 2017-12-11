@@ -352,7 +352,7 @@ mkVal (EBool _ False) = "false"
 mkVal (EString _ str) = pp $ "'" ++ str ++ "'"
 mkVal (EBit _ w v) | w < 64    = pp v
                    | otherwise = pp $ "B'" ++ (map ((\b -> if' b '1' '0') . testBit v) (reverse [0..w-1])) ++ "'"
-mkVal e@ELambda{}     = pp e
+mkVal e@ELambda{}     = "'" <> pp e <> "'"
 mkVal e               = error $ "SQL.mkVal " ++ (render $ pp e)
 
 mkConstraint :: (?r::Refine) => Relation -> Constraint -> Int -> (Doc, Doc, Doc)
@@ -455,7 +455,7 @@ parseVal json prefix Field{..} =
          TBit _ w | w < 64           -> eBit w $ parseInt val
                   | otherwise        -> eBit w $ readBin $ parseString val
          TString _                   -> eString $ parseString val
-         TLambda{}                   -> case parse lambdaGrammar "" (parseString val) of
+         TLambda{}                   -> case parse exprGrammar "" (parseString val) of
                                              Left  e -> error $ "Failed to parse lambda expression: " ++ show e
                                              Right l -> l
          t                           -> error $ "SQL.parseVal " ++ show t
