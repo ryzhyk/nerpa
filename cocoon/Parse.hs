@@ -20,6 +20,7 @@ limitations under the License.
 module Parse ( cocoonGrammar
              , cmdGrammar
              , cfgGrammar
+             , exprGrammar
              , lambdaGrammar) where
 
 import Control.Applicative hiding (many,optional,Const)
@@ -156,6 +157,7 @@ cocoonGrammar = removeTabs *> ((optional whiteSpace) *> spec <* eof)
 cmdGrammar = removeTabs *> ((optional whiteSpace) *> cmd <* eof)
 cfgGrammar = removeTabs *> ((optional whiteSpace) *> (many relation) <* eof)
 lambdaGrammar = removeTabs *> ((optional whiteSpace) *> elambda <* eof) 
+exprGrammar = removeTabs *> ((optional whiteSpace) *> expr <* eof) 
 
 cmd =  (Left  <$ reservedOp ":" <*> many1 identifier)
    <|> (Right <$> expr)

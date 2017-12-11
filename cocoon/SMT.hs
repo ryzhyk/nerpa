@@ -161,7 +161,7 @@ exprFromSMT (SMT.EBit w i)               = eBit w i
 exprFromSMT (SMT.EInt i)                 = eInt i
 exprFromSMT (SMT.EString s)              = eString s
 exprFromSMT (SMT.EStruct "__Lambda" [SMT.EString x]) 
-                                         = case parse lambdaGrammar "" x of
+                                         = case parse exprGrammar "" x of
                                                 Left  e -> error $ "Failed to parse lambda expression: " ++ show e
                                                 Right l -> l 
 exprFromSMT (SMT.EStruct n fs)           = eStruct n $ map exprFromSMT fs
