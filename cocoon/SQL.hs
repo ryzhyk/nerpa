@@ -352,7 +352,7 @@ mkVal (EBool _ False) = "false"
 mkVal (EString _ str) = pp $ "'" ++ str ++ "'"
 mkVal (EBit _ w v) | w < 64    = pp v
                    | otherwise = pp $ "B'" ++ (map ((\b -> if' b '1' '0') . testBit v) (reverse [0..w-1])) ++ "'"
-mkVal e@ELambda{}     = "'" <> pp e <> "'"
+mkVal e@ELambda{}     = "'" <> (text $ replace "'" "''" $ show e) <> "'"
 mkVal e               = error $ "SQL.mkVal " ++ (render $ pp e)
 
 mkConstraint :: (?r::Refine) => Relation -> Constraint -> Int -> (Doc, Doc, Doc)
