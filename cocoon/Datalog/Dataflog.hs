@@ -188,14 +188,13 @@ mkRules :: (?q::SMTQuery, ?rels::[Relation]) => [Rule] -> Doc
 mkRules rules = 
         ("let" <+> tuple retvars <+> "= worker.dataflow::<u64,_,_>(move |outer| {") $$
         (nest' $ vcat $ map mkSCC sccs) $$
-        (nest' $ vcat distinct) $$
+        --(nest' $ vcat distinct) $$
         (nest' $ vcat probes) $$
         (nest' $ tuple retvals) $$
         "});"
     where
     rels = ?rels
     retvars = map (\rl -> "mut" <+> (pp $ hname rl)) rels
-    distinct = map (\rl -> "let " <> pp (name rl) <> " = " <> pp (name rl) <> ".distinct();") rels
     probes = map (\rl -> let n = pp $ name rl in
                          if relIsView rl 
                             then n <> ".inspect(move |x| upd(&_w" <> n <> ", &(x.0), x.2)).probe_with(&mut probe1)" <> semi
@@ -226,7 +225,8 @@ mkRules rules =
                  $ filter (all (\rel -> notElem (relidx rel) screls) . ruleBodyRels) -- non-recursive rules only
                  $ nub $ map sel3 $ G.inn sccgraph sc
             child = mkChildScope screls
-        in vcat $ collects ++ rs ++ [child]
+            distinct = map ((\rl -> "let " <> pp (name rl) <> " = " <> pp (name rl) <> ".distinct();") . (rels !!)) screls
+        in vcat $ collects ++ rs ++ [child] ++ distinct
 
     mkChildScope :: [G.Node] -> Doc
     mkChildScope screls =
