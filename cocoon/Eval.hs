@@ -262,6 +262,7 @@ evalExpr'' ctx e = do
                                   mapM_ (\f -> lift $ do putStrLn $ show f
                                                          (DL.removeFact ?dl) f) facts'
                                   return $ Left $ meTuple []
+        ELambda{}           -> return $ Left $ expr2MExpr $ E e
         _                   -> error $ "Eval.evalExpr " ++ show e
 
 emptyVal :: (?r::Refine) => Type -> MExpr
