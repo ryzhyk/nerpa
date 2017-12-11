@@ -330,7 +330,34 @@ mkCond' c yes no =
 
 -- TODO: use BDDs to encode arbitrary pipelines
 mkPLMatch :: I.Pipeline -> [[O.Match]]
-mkPLMatch I.Pipeline{..} = 
+mkPLMatch pl = mkSimpleCond $ fst $ mkPLMatchNode M.empty (I.plEntryNode pl) pl
+
+mkPLMatchNode :: M.Map I.Expr I.Expr -> I.NodeId -> I.Pipeline -> (I.Expr, I.Expr)
+mkPLMatchNode vars nd pl@I.Pipeline{..} = 
+    case fromJust $ G.lab plCFG nd of
+         I.Cond cs -> foldl' (\(yes, no) (c, b) -> 
+                               let c' = I.exprSubst vars c
+                               in mkPLMatchBB vars c' (yes, no) pl b) 
+                             (I.EBool False, I.EBool False) cs
+         I.Par [b] -> mkPLMatchBB vars (I.EBool True) (I.EBool False, I.EBool False) pl b
+         I.Par []  -> (I.EBool False, I.EBool True)
+         n         -> error $ "IR2OF.mkPLMatchNode " ++ show n
+
+mkPLMatchBB :: M.Map I.Expr I.Expr -> I.Expr -> (I.Expr, I.Expr) -> I.Pipeline -> I.BB -> (I.Expr, I.Expr) 
+mkPLMatchBB vars c (yes, no) pl (I.BB as nxt) = 
+    let vars' = foldl' mkPLMatchAction vars as in
+    case nxt of
+         I.Drop     -> (I.conj [I.EUnOp Not no, c], no)
+         I.Goto nd' -> let (yes', no') = mkPLMatchNode vars' nd' pl
+                       in (I.disj [yes, I.conj [c, yes']], I.disj [no, I.conj [c, no']])
+         _          -> error ""
+
+mkPLMatchAction :: M.Map I.Expr I.Expr -> I.Action -> M.Map I.Expr I.Expr
+mkPLMatchAction vars (I.ASet lhs rhs) = let rhs' = I.exprSubst vars rhs
+                                        in M.insert lhs rhs' vars
+mkPLMatchAction _    a                = error $ "IR2OF.mkPLMatchAction " ++ show a
+
+{-
     if G.order plCFG == 2 
        then case G.lab plCFG plEntryNode of
                  Just (I.Cond cs) -> mkSimpleCond $ cs2expr cs
@@ -341,6 +368,7 @@ mkPLMatch I.Pipeline{..} =
     cs2expr ((c, I.BB [] I.Drop):cs) = I.EBinOp Or c $ cs2expr cs
     cs2expr ((c, _):cs)              = I.EBinOp And (I.EUnOp Not c) $ cs2expr cs
     cs2expr []                       = I.EBool False 
+-}
 
 mkSimpleCond :: I.Expr -> [[O.Match]]
 mkSimpleCond e = mkSimpleCond' $ I.exprEval e

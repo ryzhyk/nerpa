@@ -164,7 +164,6 @@ exprVars' (EBinOp _ e1 e2)  = exprVars' e1 ++ exprVars' e2
 exprVars' (EUnOp _ e)       = exprVars' e
 exprVars' (ELambda as _)    = concatMap exprVars' as
 
-
 exprCols :: Expr -> [VarName]
 exprCols e = nub $ exprCols' e
 
@@ -197,6 +196,12 @@ exprSubstVar :: VarName -> Expr -> Expr -> Expr
 exprSubstVar v e' e = exprMap (\case 
                                 EVar v' _ | v' == v -> e'
                                 x                   -> x) e
+
+exprSubst :: M.Map Expr Expr -> Expr -> Expr
+exprSubst m e = exprMap f e
+    where f e' = case M.lookup e' m of
+                      Nothing -> e'
+                      Just x  -> x
 
 exprIsConst :: Expr -> Bool
 exprIsConst EBit{}    = True
