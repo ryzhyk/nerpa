@@ -524,20 +524,23 @@ def getOvsParser():
 def getField(node, field):
     return next(x for x in node.children if x.symbol.name == field)
 
+def getFields(node, f):
+    return filter(f, node.children)
+
 def getList(node, field, fields):
     if len(node.children) == 0:
         return []
     else:
         f = getField(node, field)
-        tail = getOptField(node, fields)
+        tail = getOptField(node, fields, None)
         if tail == None:
             return [f]
         else:
             fs = getList(tail, field, fields)
             return [f] + fs
 
-def getOptField(node, field):
-    return next((x for x in node.children if x.symbol.name == field), None)
+def getOptField(node, field, default):
+    return next((x for x in node.children if x.symbol.name == field), default)
 
 def impersonateOVN(line):
     parser = getOvnParser()
@@ -577,7 +580,7 @@ def ovnLsAdd(cmd):
 def ovnLspAdd(cmd):
     sw = getField(cmd, 'Switch').children[0].value
     port = getField(cmd, 'Port').children[0].value
-    partag = getOptField(cmd, 'ParentAndTagRequest')
+    partag = getOptField(cmd, 'ParentAndTagRequest', None)
     par = None
     tag = None
     if partag != None:
@@ -662,12 +665,28 @@ def getConst(const):
     else:
         raise Exception('Invalid constant ' + const.tree_str())
 
+
+def ovnCreate(cmd):
+    table = getField(cmd, 'Table').children[0].value
+    entries = map(lambda x: x.children[0], getFields(cmd, lambda x: x.symbol.name.startswith('TableEntry')))
+    log('create ' + table + ' ' + ' '.join(map(getTableEntry, entries)))
+
+def getTableEntry(entry):
+    col = getField(entry, 'Column').children[0].value
+    okey = getField(entry, 'OptKey')
+    key = ""
+    if len(okey.children) == 2:
+        key = ":" + okey.children[1].value
+    val = getField(entry, 'Value').value
+    return col + ' ' + key + '=' + val
+
 ovnHandlers = { 'init'               : ovnInit
               , 'LsAdd'              : ovnLsAdd
               , 'LspAdd'             : ovnLspAdd
               , 'LspSetAddresses'    : ovnLspSetAddresses
               , 'LspSetPortSecurity' : ovnLspSetPortSecurity
               , 'AclAdd'             : ovnAclAdd
+              , 'Create'             : ovnCreate
               }
 
 
