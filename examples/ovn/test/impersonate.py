@@ -529,9 +529,12 @@ def getList(node, field, fields):
         return []
     else:
         f = getField(node, field)
-        tail = getField(node, fields)
-        fs = getList(tail, field, fields)
-        return [f] + fs
+        tail = getOptField(node, fields)
+        if tail == None:
+            return [f]
+        else:
+            fs = getList(tail, field, fields)
+            return [f] + fs
 
 def getOptField(node, field):
     return next((x for x in node.children if x.symbol.name == field), None)
@@ -590,14 +593,14 @@ def ovnLspSetAddresses(cmd):
     log('adding switch port addresses ' + port + ' ' + ','.join(addr_strs))
 
 def addrStr(addr):
-    if addr.child[0].symbol.name == "unknown":
+    if addr.children[0].symbol.name == "unknown":
         return "unknown"
-    elif addr.child[0].symbol.name == "dynamic":
+    elif addr.children[0].symbol.name == "dynamic":
         return "dynamic"
-    elif addr.child[0].symbol.name == "router":
+    elif addr.children[0].symbol.name == "router":
         return "router"
     else:
-        eth = getField(addr, 'EthAddress').children[0].value
+        eth = getField(addr, 'EthAddress').value
         ips = map(ipStr, getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList'))
         return " ".join([eth] + ips)
 
@@ -635,7 +638,7 @@ def getExpr(expr):
         return "(" + getSymbol(expr.children[0]) + expr.children[1].children[0].value + getConst(expr.children[2]) + ")" 
     elif len(expr.children) == 1 and expr.children[0].symbol.name == "Symbol":
         return getSymbol(expr.children[0])
-    elif len(expr.children) == 1:
+    elif len(expr.children) == 1 or len(expr.children) == 3:
         return getExpr(getField(expr, 'Expression'))
     else:
         raise Exception('Invalid expression ' + expr.tree_str())
