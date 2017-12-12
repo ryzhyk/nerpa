@@ -13,6 +13,7 @@ import imp
 import parglare   # parser generator
 import ntpath
 import ipaddress
+import os
 
 # These are grammars in the parglare parser generator syntax for
 # parsing (a subset of) the ovn-nbctl/ovs-vsctl command-line
@@ -61,6 +62,7 @@ OptKey
 
 Address
 : "'" EthAddress IpAddressList "'"
+| EthAddress IpAddressList
 | "unknown"
 | "dynamic"
 | "router"
@@ -444,7 +446,7 @@ Record
 """
 
 verbose = False
-logfile = open("/home/lryzhyk/test.log", 'a')
+logfile = open(os.environ.get("HOME") + "/test.log", 'a')
 
 def log(str):
     logfile.write(str + '\n')
@@ -484,21 +486,25 @@ def main():
         verbose = True
     impersonate = ntpath.basename(sys.argv[0])
 
-    # TODO: update these with the location and names of the actual binaries
+    # update these with the location and names of the actual binaries
     currentParser = None
     originalCommand = None
+    ovsHome = os.environ.get("OVSHOME")
+    if ovsHome == None:
+        # Fallback
+        ovsHome = "/home/lryzhyk/projects/ovs/"
     if impersonate == "ovn-nbctl":
-        originalCommand = "/home/lryzhyk/projects/ovs/ovn/utilities/ovn-nbctl"
+        originalCommand = ovsHome + "ovn/utilities/ovn-nbctl"
     else:
-        originalCommand = "/home/lryzhyk/projects/ovs/utilities/ovs-vsctl"
+        originalCommand = ovsHome + "utilities/ovs-vsctl"
 
     sys.argv[0] = originalCommand
     if len(sys.argv) > 1:
         # Given arguments start impersonating the respective binary
         line = ""
         for arg in sys.argv[1:]:
-            if arg.strip() == "":
-                arg = "''"   #  otherwise we lose this argument
+            if " " in arg:
+                arg = "'" + arg + "'"
             line += " " + arg
 
         if impersonate == "ovn-nbctl":
@@ -508,7 +514,15 @@ def main():
         callOriginal(sys.argv)
     else:
         # otherwise just run tests
-        test(ovnParser, ovsParser)
+        test()
+
+def getOvnParser():
+    g = parglare.Grammar.from_string(ovnGrammar)
+    return parglare.Parser(g, build_tree=True)
+
+def getOvsParser():
+    g = parglare.Grammar.from_string(ovsGrammar)
+    return parglare.Parser(g, build_tree=True)
 
 def getField(node, field):
     return next(x for x in node.children if x.symbol.name == field)
@@ -526,8 +540,7 @@ def getOptField(node, field):
     return next((x for x in node.children if x.symbol.name == field), None)
 
 def impersonateOVN(line):
-    g = parglare.Grammar.from_string(ovnGrammar)
-    parser = parglare.Parser(g, build_tree=True) # , debug=True)
+    parser = getOvnParser()
     try:
         options = parseOptions(parser, line)
     except parglare.exceptions.ParseError as e:
@@ -657,10 +670,9 @@ ovnHandlers = { 'init'               : ovnInit
               , 'AclAdd'             : ovnAclAdd
               }
 
-   
+
 def impersonateOVS(line):
-    g = parglare.Grammar.from_string(ovsGrammar)
-    parser = parglare.Parser(g, build_tree=True)
+    parser = getOvsParser()
     try:
         options = parseOptions(parser, line)
     except parglare.exceptions.ParseError as e:
@@ -675,7 +687,6 @@ def testIpMatch():
     """
     mo = re.match(r'\d{1,3}[.]\d{1,3}[.]\d{1,3}[.]\d{1,3}', "192.168.1.5")
     assert(mo)
-    # https://stackoverflow.com/questions/53497/regular-expression-that-matches-valid-ipv6-addresses
     ipv6address = "([0-9a-fA-F]{0,4}:){1,7}([0-9a-fA-F]{0,4})"
 #     |
 # ((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}
@@ -735,6 +746,7 @@ ovn-nbctl --timeout=30 init
 ovn-nbctl --timeout=30 ls-add lsw0
 ovn-nbctl --timeout=30 lsp-add lsw0 lp11
 ovn-nbctl --timeout=30 lsp-set-addresses lp11 'f0:00:00:00:00:11 192.168.0.11' unknown
+ovn-nbctl --timeout=30 lsp-set-addresses lp11 f0:00:00:00:00:11 192.168.0.11 unknown
 ovn-nbctl --timeout=30 lsp-add lsw0 lp12
 ovn-nbctl --timeout=30 lsp-set-addresses lp12 'f0:00:00:00:00:12 192.168.0.12'
 ovn-nbctl --timeout=30 lsp-set-port-security lp12 f0:00:00:00:00:12
@@ -807,12 +819,11 @@ def testIpConversion():
     bytes = convertIpToBytes('2001:db8::1')
     assert bytes == "20010db8000000000000000000000001", bytes
 
-def test(ovnParser, ovsParser):
-    print verbose
+def test():
     testIpConversion()
     testIpMatch()
-    testStrings(ovnTestLines, ovnParser)
-    testStrings(ovsTestLines, ovsParser)
+    testStrings(ovnTestLines, getOvnParser())
+    testStrings(ovsTestLines, getOvsParser())
 
 if __name__ == "__main__":
    main()
