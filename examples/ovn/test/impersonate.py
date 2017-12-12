@@ -476,8 +476,6 @@ def callOriginal(options):
         print "Calling ", options
     subprocess.call(options)
 
-
-
 def main():
     global verbose
     if len(sys.argv) > 1:
@@ -514,6 +512,15 @@ def main():
 
 def getField(node, field):
     return next(x for x in node.children if x.symbol.name == field)
+
+def getList(node, field, fields):
+    if len(node.children) == 0:
+        return []
+    else:
+        f = getField(node, field)
+        tail = getField(node, fields)
+        fs = getList(tail, field, fields)
+        return [f] + fs
 
 def getOptField(node, field):
     return next((x for x in node.children if x.symbol.name == field), None)
@@ -567,6 +574,21 @@ def ovnLspAdd(cmd):
 
 def ovnLspSetAddresses(cmd):
     port = getField(cmd, 'Port').children[0].value
+    addrs = getList(getField(cmd, 'Addresses'), 'Address', 'Addresses')
+    addr_strs = map(addrStr, addrs)
+    #for addr in addrs:
+    log('adding switch port addresses ' + port + ' ' + ','.join(addr_strs))
+
+def addrStr(addr):
+    if addr.child[0].symbol.name == "unknown":
+        return "unknown"
+    elif addr.child[0].symbol.name == "dynamic":
+        return "dynamic"
+    elif addr.child[0].symbol.name == "router":
+        return "router"
+    else:
+        "actual address"
+#: "'" EthAddress IpAddressList "'"
 
 ovnHandlers = { 'init'              : ovnInit
               , 'LsAdd'             : ovnLsAdd
