@@ -597,10 +597,64 @@ def ipStr(ip):
     else:
         return ip.children[0].children[0].value
 
-ovnHandlers = { 'init'              : ovnInit
-              , 'LsAdd'             : ovnLsAdd
-              , 'LspAdd'            : ovnLspAdd
-              , 'LspSetAddresses'   : ovnLspSetAddresses
+def ovnLspSetPortSecurity(cmd):
+    port = getField(cmd, 'Port').children[0].value
+    addrs = getList(getField(cmd, 'Addresses'), 'Address', 'Addresses')
+    addr_strs = map(addrStr, addrs)
+    #for addr in addrs:
+    log('lsp-set-port-security ' + port + ' ' + ','.join(addr_strs))
+
+def ovnAclAdd(cmd):
+    sw        = getField(cmd, 'Switch').children[0].value
+    direction = getField(cmd, 'Direction').children[0].value
+    prio      = getField(cmd, 'Priority').children[0].children[0].value
+    match     = getExpr(getField(cmd, 'Match').children[0])
+    verdict   = getField(cmd, 'Verdict').children[0].value
+    log('acl-add ' + ' '.join([sw, direction, prio, match, verdict]))
+
+def getExpr(expr):
+    if expr.children[0].symbol.name == "!":
+        return "(!" + getExpr(expr.children[1]) + ")"
+    elif len(expr.children) == 4 and expr.children[1].symbol.name == "[":
+        return getSymbol(expr.children[0]) + "[" + expr.children[2].value +  "]"
+    elif len(expr.children) == 6 and expr.children[3].symbol.name == "..":
+        return getSymbol(expr.children[0]) + "[" + expr.children[2].value + ".." + expr.children[4].value + "]"
+    elif len(expr.children) == 3 and expr.children[1].symbol.name == "BoolOp":
+        return "(" + getExpr(expr.children[0]) + expr.children[1].children[0].value + getExpr(expr.children[2]) + ")" 
+    elif len(expr.children) == 3 and expr.children[1].symbol.name == "RelOp":
+        return "(" + getSymbol(expr.children[0]) + expr.children[1].children[0].value + getConst(expr.children[2]) + ")" 
+    elif len(expr.children) == 1 and expr.children[0].symbol.name == "Symbol":
+        return getSymbol(expr.children[0])
+    elif len(expr.children) == 1:
+        return getExpr(getField(expr, 'Expression'))
+    else:
+        raise Exception('Invalid expression ' + expr.tree_str())
+
+def getSymbol(sym):
+    if sym.children[0].symbol.name == 'Identifier':
+        return sym.children[0].value
+    else:
+        return getSymbol(sym.children[0]) + '.' + sym.children[2].value
+
+def getConst(const):
+    sym = const.children[0].symbol.name
+    if sym == 'Number':
+        return const.children[0].children[0].value
+    elif sym == '{':
+        return map(lambda x: x.children[0].children[0].value , getList(const.children[1], 'SimpleConstant', 'ConstantList'))
+    elif sym == 'String':
+        return const.children[0].value
+    elif sym == 'VariableName':
+        return '$' + const.children[0].children[1].value
+    else:
+        raise Exception('Invalid constant ' + const.tree_str())
+
+ovnHandlers = { 'init'               : ovnInit
+              , 'LsAdd'              : ovnLsAdd
+              , 'LspAdd'             : ovnLspAdd
+              , 'LspSetAddresses'    : ovnLspSetAddresses
+              , 'LspSetPortSecurity' : ovnLspSetPortSecurity
+              , 'AclAdd'             : ovnAclAdd
               }
 
    
