@@ -12,6 +12,7 @@ import re
 import imp
 import parglare   # parser generator
 import ntpath
+import ipaddress
 
 # These are grammars in the parglare parser generator syntax for
 # parsing (a subset of) the ovn-nbctl/ovs-vsctl command-line
@@ -41,6 +42,7 @@ Table
 
 TableEntry
 : Column OptKey "=" Value
+| "'" Column OptKey "=" Value "'"
 ;
 
 Column
@@ -48,7 +50,7 @@ Column
 ;
 
 Value
-: /\S+/
+: /(\S|[^'])+/
 ;
 
 OptKey
@@ -129,6 +131,7 @@ Priority
 
 Switch
 : Identifier
+| /'[^']*'/
 ;
 
 Router
@@ -216,7 +219,7 @@ GlobalOption
 Options_command_args
 : EMPTY
 | "init"
-| "show" Switch
+| "show" Switch?
 | LsAdd
 | LsDel
 | LsList
@@ -232,7 +235,11 @@ Options_command_args
 ;
 
 Create
-: "--id=@" Identifier "create" Table TableEntry
+: CreateId? "create" Table TableEntry+
+;
+
+CreateId
+: "--id=@" Identifier
 ;
 
 LspSetAddresses
@@ -330,6 +337,7 @@ ovsGrammar = commonGrammar + """
 GlobalOption
 : "--timeout=" Number
 | "--no-wait"
+| "--bare"
 ;
 
 Options_command_args
@@ -360,6 +368,29 @@ OptionsCommand
 | "init"
 | "show"
 | Get
+| Find
+;
+
+TableEntrySelector
+: Column OptKey RelOpAndEq Value
+;
+
+RelOpAndEq
+: RelOp
+| "="
+;
+
+Find
+: ColumnPrefixList? "find" Table TableEntrySelector
+;
+
+ColumnPrefixList
+: "--columns" ColumnList
+;
+
+ColumnList
+: Column
+| Column "," ColumnList
 ;
 
 AddPort
@@ -418,11 +449,19 @@ logfile = open("/home/lryzhyk/test.log", 'a')
 def log(str):
     logfile.write(str + '\n')
 
+def convertIpToBytes(ipAddress):
+    """
+    Given an IPv4 or IPv6 address like 192.168.1.200 converts it into a byte string
+    of hexadecimal values
+    """
+    add = ipaddress.ip_address(unicode(ipAddress))
+    return format(int(add), 'x')
+
 def parseOptions(parser, line):
     """
     Parse the command-line options using the indicated grammar.
     """
-    if verbose: 
+    if verbose:
         print "Parsing ", line
     result = parser.parse(line)
     if verbose:
@@ -433,16 +472,19 @@ def callOriginal(options):
     """
     Relay the call to the original program.
     """
+    if verbose:
+        print "Calling ", options
     subprocess.call(options)
 
 
 
 def main():
-    impersonate = ntpath.basename(sys.argv[0])
+    global verbose
     if len(sys.argv) > 1:
         verbose = False
     else:
         verbose = True
+    impersonate = ntpath.basename(sys.argv[0])
 
     # TODO: update these with the location and names of the actual binaries
     currentParser = None
@@ -455,13 +497,16 @@ def main():
     sys.argv[0] = originalCommand
     if len(sys.argv) > 1:
         # Given arguments start impersonating the respective binary
-        line = " ".join(sys.argv[1:])
+        line = ""
+        for arg in sys.argv[1:]:
+            if arg.strip() == "":
+                arg = "''"   #  otherwise we lose this argument
+            line += " " + arg
 
         if impersonate == "ovn-nbctl":
             impersonateOVN(line)
         else:
             impersonateOVS(line)
-
         callOriginal(sys.argv)
     else:
         # otherwise just run tests
@@ -473,13 +518,14 @@ def getField(node, field):
 def getOptField(node, field):
     return next((x for x in node.children if x.symbol.name == field), None)
 
-
-
-
 def impersonateOVN(line):
     g = parglare.Grammar.from_string(ovnGrammar)
     parser = parglare.Parser(g, build_tree=True) # , debug=True)
-    options = parseOptions(parser, line)
+    try:
+        options = parseOptions(parser, line)
+    except parglare.exceptions.ParseError as e:
+        print impersonate, "error parsing", "`" + line + "'", str(e)
+
     log('\n')
     log(line)
     log(options.tree_str())
@@ -522,14 +568,6 @@ def ovnLspAdd(cmd):
 def ovnLspSetAddresses(cmd):
     port = getField(cmd, 'Port').children[0].value
 
-: "lsp-set-addresses" Port Addresses
-;
-
-Addresses
-: EMPTY
-| Address Addresses
-;
-
 ovnHandlers = { 'init'              : ovnInit
               , 'LsAdd'             : ovnLsAdd
               , 'LspAdd'            : ovnLspAdd
@@ -540,7 +578,10 @@ ovnHandlers = { 'init'              : ovnInit
 def impersonateOVS(line):
     g = parglare.Grammar.from_string(ovsGrammar)
     parser = parglare.Parser(g, build_tree=True)
-    options = parseOptions(parser, line)
+    try:
+        options = parseOptions(parser, line)
+    except parglare.exceptions.ParseError as e:
+        print impersonate, "error parsing", "`" + line + "'", str(e)
     log('\n')
     log(line)
     log(options.tree_str())
@@ -639,6 +680,7 @@ ovn-nbctl --timeout=30 acl-add lsw0 to-lport 1000 'eth.type == 0x1236 && outport
 ovn-nbctl --timeout=30 create Address_Set name=set1 'addresses="f0:00:00:00:00:11","f0:00:00:00:00:21","f0:00:00:00:00:31"'
 ovn-nbctl --timeout=30 acl-add lsw0 to-lport 1000 'eth.type == 0x1237 && eth.src == $set1 && outport == "lp33"' drop
 ovn-nbctl --timeout=30 lsp-set-addresses lp13 'f0:00:00:00:00:13 192.168.0.13 invalid 192.169.0.13'
+ovn-nbctl --timeout=30 lsp-add ls2 ln2 '' 101
 """
 
 ovsTestLines = """
@@ -676,7 +718,15 @@ def testStrings(str, parser):
         tail = " ".join(line.split()[1:])
         parseOptions(parser, tail)
 
+def testIpConversion():
+    bytes = convertIpToBytes('192.168.1.2')
+    assert bytes == "c0a80102", bytes
+    bytes = convertIpToBytes('2001:db8::1')
+    assert bytes == "20010db8000000000000000000000001", bytes
+
 def test(ovnParser, ovsParser):
+    print verbose
+    testIpConversion()
     testIpMatch()
     testStrings(ovnTestLines, ovnParser)
     testStrings(ovsTestLines, ovsParser)
