@@ -413,6 +413,10 @@ Record
 """
 
 verbose = False
+logfile = open("/home/lryzhyk/test.log", 'a')
+
+def log(str):
+    logfile.write(str + '\n')
 
 def parseOptions(parser, line):
     """
@@ -423,6 +427,7 @@ def parseOptions(parser, line):
     result = parser.parse(line)
     if verbose:
         print(result.tree_str())
+    return result
 
 def callOriginal(options):
     """
@@ -430,36 +435,115 @@ def callOriginal(options):
     """
     subprocess.call(options)
 
+
+
 def main():
     impersonate = ntpath.basename(sys.argv[0])
     if len(sys.argv) > 1:
         verbose = False
     else:
         verbose = True
-    g = parglare.Grammar.from_string(ovnGrammar)
-    ovnParser = parglare.Parser(g, build_tree=True) # , debug=True)
-    g = parglare.Grammar.from_string(ovsGrammar)
-    ovsParser = parglare.Parser(g, build_tree=True)
 
     # TODO: update these with the location and names of the actual binaries
     currentParser = None
     originalCommand = None
     if impersonate == "ovn-nbctl":
         originalCommand = "/home/lryzhyk/projects/ovs/ovn/utilities/ovn-nbctl"
-        currentParser = ovnParser
     else:
         originalCommand = "/home/lryzhyk/projects/ovs/utilities/ovs-vsctl"
-        currentParser = ovsParser
 
     sys.argv[0] = originalCommand
     if len(sys.argv) > 1:
         # Given arguments start impersonating the respective binary
         line = " ".join(sys.argv[1:])
-        #parseOptions(currentParser, line)
+
+        if impersonate == "ovn-nbctl":
+            impersonateOVN(line)
+        else:
+            impersonateOVS(line)
+
         callOriginal(sys.argv)
     else:
         # otherwise just run tests
         test(ovnParser, ovsParser)
+
+def getField(node, field):
+    return next(x for x in node.children if x.symbol.name == field)
+
+def getOptField(node, field):
+    return next((x for x in node.children if x.symbol.name == field), None)
+
+
+
+
+def impersonateOVN(line):
+    g = parglare.Grammar.from_string(ovnGrammar)
+    parser = parglare.Parser(g, build_tree=True) # , debug=True)
+    options = parseOptions(parser, line)
+    log('\n')
+    log(line)
+    log(options.tree_str())
+    cmd = ovnGetCommand(options)
+    if cmd == None:
+        log('no command, ignoring')
+    else:
+        log('command symbol: ' + cmd.symbol.name)
+        if cmd.symbol.name in ovnHandlers:
+            ovnHandlers[cmd.symbol.name](cmd)
+        else:
+            log('unknown command, ignoring')
+
+def ovnGetCommand(options):
+    args = getField(options, 'Options_command_args')
+    if len(args.children) == 0:
+        return None
+    else:
+        return args.children[0]
+
+def ovnInit(cmd):
+    log('init: nothing to do here')
+
+def ovnLsAdd(cmd):
+    swopt = getField(cmd, 'Switch_opt')
+    swname = getField(swopt, 'Switch').children[0].value
+    log('adding switch ' + swname)
+
+def ovnLspAdd(cmd):
+    sw = getField(cmd, 'Switch').children[0].value
+    port = getField(cmd, 'Port').children[0].value
+    partag = getOptField(cmd, 'ParentAndTagRequest')
+    par = None
+    tag = None
+    if partag != None:
+        par = getField(partag, 'Parent').children[0].value
+        tag = getField(partag, 'TagRequest').children[0].value
+    log('adding switch port ' + sw + ' ' + port + ' ' + str(par) + ' ' + str(tag))
+
+def ovnLspSetAddresses(cmd):
+    port = getField(cmd, 'Port').children[0].value
+
+: "lsp-set-addresses" Port Addresses
+;
+
+Addresses
+: EMPTY
+| Address Addresses
+;
+
+ovnHandlers = { 'init'              : ovnInit
+              , 'LsAdd'             : ovnLsAdd
+              , 'LspAdd'            : ovnLspAdd
+              , 'LspSetAddresses'   : ovnLspSetAddresses
+              }
+
+   
+def impersonateOVS(line):
+    g = parglare.Grammar.from_string(ovsGrammar)
+    parser = parglare.Parser(g, build_tree=True)
+    options = parseOptions(parser, line)
+    log('\n')
+    log(line)
+    log(options.tree_str())
 
 def testIpMatch():
     """
