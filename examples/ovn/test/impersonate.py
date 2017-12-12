@@ -587,8 +587,15 @@ def addrStr(addr):
     elif addr.child[0].symbol.name == "router":
         return "router"
     else:
-        "actual address"
-#: "'" EthAddress IpAddressList "'"
+        eth = getField(addr, 'EthAddress').children[0].value
+        ips = map(ipStr, getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList'))
+        return " ".join([eth] + ips)
+
+def ipStr(ip):
+    if ip.children[0].symbol.name == 'invalid':
+        return 'invalid'
+    else:
+        return ip.children[0].children[0].value
 
 ovnHandlers = { 'init'              : ovnInit
               , 'LsAdd'             : ovnLsAdd
