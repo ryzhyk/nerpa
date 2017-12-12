@@ -252,7 +252,7 @@ Addresses
 ;
 
 LspSetPortSecurity
-: "lsp-set-port-security" Port EthAddresses
+: "lsp-set-port-security" Port Addresses
 ;
 
 LspDel
