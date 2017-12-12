@@ -16,7 +16,7 @@ procedure vSwitchIngress(port: VSwitchPort): sink = {
     } else {
         // trunk port? find VIF interface; strip vlan tag
         the (p in LogicalSwitchPort | match (p.ptype) { 
-                                          LPortVIF{parent,_,tag} -> parent == p.id and tag == pkt.vlan.vid and p.enabled,
+                                          LPortVIF{parent,_,tag} -> parent == port.lport and tag == pkt.vlan.vid and p.enabled,
                                           _ -> false
                                       } ) {
             lport = p;
@@ -559,7 +559,6 @@ procedure lportEgress(lport: LogicalSwitchPort, chassis : chassis_id_t): sink = 
     /* Run through connection tracker if needed */
     egressConnTrack(lport);
 
-    /* XXX: I don't understand how LB works on egress */
     var lbcommit = egressLB(lport);
 
     /* acl */
