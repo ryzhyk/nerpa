@@ -490,9 +490,6 @@ def main():
     currentParser = None
     originalCommand = None
     ovsHome = os.environ.get("OVSHOME")
-    if ovsHome == None:
-        # Fallback
-        ovsHome = "/home/lryzhyk/projects/ovs/"
     if impersonate == "ovn-nbctl":
         originalCommand = ovsHome + "ovn/utilities/ovn-nbctl"
     else:
