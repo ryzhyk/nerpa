@@ -11,6 +11,7 @@ import subprocess
 import re
 import imp
 import parglare   # parser generator
+import ntpath
 
 # These are grammars in the parglare parser generator syntax for
 # parsing (a subset of) the ovn-nbctl/ovs-vsctl command-line
@@ -411,46 +412,50 @@ Record
 ;
 """
 
+verbose = False
+
 def parseOptions(parser, line):
     """
     Parse the command-line options using the indicated grammar.
     """
-    print "Parsing ", line
+    if verbose: 
+        print "Parsing ", line
     result = parser.parse(line)
-    print(result.tree_str())
+    if verbose:
+        print(result.tree_str())
 
 def callOriginal(options):
     """
-    Relay the call to the ovn-nbctl program.
+    Relay the call to the original program.
     """
-    orig_command = "/home/mbudiu/git/ovs/ovn/utilities/ovn-nbctl-orig"
-    options[0] = orig_command
     subprocess.call(options)
 
 def main():
-    impersonate = sys.argv[0]
-
+    impersonate = ntpath.basename(sys.argv[0])
+    if len(sys.argv) > 1:
+        verbose = False
+    else:
+        verbose = True
     g = parglare.Grammar.from_string(ovnGrammar)
     ovnParser = parglare.Parser(g, build_tree=True) # , debug=True)
     g = parglare.Grammar.from_string(ovsGrammar)
     ovsParser = parglare.Parser(g, build_tree=True)
 
     # TODO: update these with the location and names of the actual binaries
-    prefix = "/home/mbudiu/git/ovs/utilities"
     currentParser = None
     originalCommand = None
     if impersonate == "ovn-nbctl":
-        originalCommand = prefix + "ovn-nbctl-orig"
+        originalCommand = "/home/lryzhyk/projects/ovs/ovn/utilities/ovn-nbctl"
         currentParser = ovnParser
     else:
-        originalCommand = prefix + "ovs-vsctl-orig"
+        originalCommand = "/home/lryzhyk/projects/ovs/utilities/ovs-vsctl"
         currentParser = ovsParser
 
+    sys.argv[0] = originalCommand
     if len(sys.argv) > 1:
         # Given arguments start impersonating the respective binary
-        print(sys.argv);
         line = " ".join(sys.argv[1:])
-        parseOptions(currentParser, line)
+        #parseOptions(currentParser, line)
         callOriginal(sys.argv)
     else:
         # otherwise just run tests
