@@ -90,7 +90,6 @@ table LogicalSwitch( id           : lswitch_id_t
 /* Logical switch port addressing
    addresses: set of strings
           Addresses owned by the logical port.  Each element in the set must take one of the following forms:
-          XXX: is "unknown" mutually exclusive with other address types?
 
           Ethernet address followed by zero or more IPv4 or IPv6 addresses (or both)
                  An  Ethernet address defined is owned by the logical port.  Like a physical Ethernet NIC, a logical port ordinarily has a single fixed Ethernet address.
