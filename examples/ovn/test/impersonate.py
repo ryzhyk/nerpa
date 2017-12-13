@@ -539,6 +539,54 @@ def getList(node, field, fields):
             fs = getList(tail, field, fields)
             return [f] + fs
 
+def getExpr(expr):
+    if expr.children[0].symbol.name == "!":
+        return "(!" + getExpr(expr.children[1]) + ")"
+    elif len(expr.children) == 4 and expr.children[1].symbol.name == "[":
+        return getSymbol(expr.children[0]) + "[" + expr.children[2].value +  "]"
+    elif len(expr.children) == 6 and expr.children[3].symbol.name == "..":
+        return getSymbol(expr.children[0]) + "[" + expr.children[2].value + ".." + expr.children[4].value + "]"
+    elif len(expr.children) == 3 and expr.children[1].symbol.name == "BoolOp":
+        return "(" + getExpr(expr.children[0]) + expr.children[1].children[0].value + getExpr(expr.children[2]) + ")" 
+    elif len(expr.children) == 3 and expr.children[1].symbol.name == "RelOp":
+        return "(" + getSymbol(expr.children[0]) + expr.children[1].children[0].value + getConst(expr.children[2]) + ")" 
+    elif len(expr.children) == 1 and expr.children[0].symbol.name == "Symbol":
+        return getSymbol(expr.children[0])
+    elif len(expr.children) == 1 or len(expr.children) == 3:
+        return getExpr(getField(expr, 'Expression'))
+    else:
+        raise Exception('Invalid expression ' + expr.tree_str())
+
+def getSymbol(sym):
+    if sym.children[0].symbol.name == 'Identifier':
+        return sym.children[0].value
+    else:
+        return getSymbol(sym.children[0]) + '.' + sym.children[2].value
+
+def getConst(const):
+    sym = const.children[0].symbol.name
+    if sym == 'Number':
+        return const.children[0].children[0].value
+    elif sym == '{':
+        return map(lambda x: x.children[0].children[0].value , getList(const.children[1], 'SimpleConstant', 'ConstantList'))
+    elif sym == 'String':
+        return const.children[0].value
+    elif sym == 'VariableName':
+        return '$' + const.children[0].children[1].value
+    else:
+        raise Exception('Invalid constant ' + const.tree_str())
+
+
+def getTableEntry(entry):
+    col = getField(entry, 'Column').children[0].value
+    okey = getField(entry, 'OptKey')
+    key = ""
+    if len(okey.children) == 2:
+        key = ":" + okey.children[1].value
+    val = getField(entry, 'Value').value
+    return col + ' ' + key + '=' + val
+
+
 def getOptField(node, field, default):
     return next((x for x in node.children if x.symbol.name == field), default)
 
@@ -549,8 +597,7 @@ def impersonateOVN(line):
     except parglare.exceptions.ParseError as e:
         print impersonate, "error parsing", "`" + line + "'", str(e)
 
-    log('\n')
-    log(line)
+    log('\novn-nbctl' + line)
     log(options.tree_str())
     cmd = ovnGetCommand(options)
     if cmd == None:
@@ -628,57 +675,11 @@ def ovnAclAdd(cmd):
     verdict   = getField(cmd, 'Verdict').children[0].value
     log('acl-add ' + ' '.join([sw, direction, prio, match, verdict]))
 
-def getExpr(expr):
-    if expr.children[0].symbol.name == "!":
-        return "(!" + getExpr(expr.children[1]) + ")"
-    elif len(expr.children) == 4 and expr.children[1].symbol.name == "[":
-        return getSymbol(expr.children[0]) + "[" + expr.children[2].value +  "]"
-    elif len(expr.children) == 6 and expr.children[3].symbol.name == "..":
-        return getSymbol(expr.children[0]) + "[" + expr.children[2].value + ".." + expr.children[4].value + "]"
-    elif len(expr.children) == 3 and expr.children[1].symbol.name == "BoolOp":
-        return "(" + getExpr(expr.children[0]) + expr.children[1].children[0].value + getExpr(expr.children[2]) + ")" 
-    elif len(expr.children) == 3 and expr.children[1].symbol.name == "RelOp":
-        return "(" + getSymbol(expr.children[0]) + expr.children[1].children[0].value + getConst(expr.children[2]) + ")" 
-    elif len(expr.children) == 1 and expr.children[0].symbol.name == "Symbol":
-        return getSymbol(expr.children[0])
-    elif len(expr.children) == 1 or len(expr.children) == 3:
-        return getExpr(getField(expr, 'Expression'))
-    else:
-        raise Exception('Invalid expression ' + expr.tree_str())
-
-def getSymbol(sym):
-    if sym.children[0].symbol.name == 'Identifier':
-        return sym.children[0].value
-    else:
-        return getSymbol(sym.children[0]) + '.' + sym.children[2].value
-
-def getConst(const):
-    sym = const.children[0].symbol.name
-    if sym == 'Number':
-        return const.children[0].children[0].value
-    elif sym == '{':
-        return map(lambda x: x.children[0].children[0].value , getList(const.children[1], 'SimpleConstant', 'ConstantList'))
-    elif sym == 'String':
-        return const.children[0].value
-    elif sym == 'VariableName':
-        return '$' + const.children[0].children[1].value
-    else:
-        raise Exception('Invalid constant ' + const.tree_str())
-
 
 def ovnCreate(cmd):
     table = getField(cmd, 'Table').children[0].value
     entries = map(lambda x: x.children[0], getFields(cmd, lambda x: x.symbol.name.startswith('TableEntry')))
     log('create ' + table + ' ' + ' '.join(map(getTableEntry, entries)))
-
-def getTableEntry(entry):
-    col = getField(entry, 'Column').children[0].value
-    okey = getField(entry, 'OptKey')
-    key = ""
-    if len(okey.children) == 2:
-        key = ":" + okey.children[1].value
-    val = getField(entry, 'Value').value
-    return col + ' ' + key + '=' + val
 
 ovnHandlers = { 'init'               : ovnInit
               , 'LsAdd'              : ovnLsAdd
@@ -689,16 +690,65 @@ ovnHandlers = { 'init'               : ovnInit
               , 'Create'             : ovnCreate
               }
 
-
 def impersonateOVS(line):
     parser = getOvsParser()
     try:
         options = parseOptions(parser, line)
     except parglare.exceptions.ParseError as e:
         print impersonate, "error parsing", "`" + line + "'", str(e)
-    log('\n')
-    log(line)
+    log('\novs-vsctl' + line)
     log(options.tree_str())
+    cmds = ovsGetCommands(options)
+    for cmd in cmds:
+        cmdname = cmd.children[0].symbol.name
+        log('command symbol: ' + cmdname)
+        if cmdname in ovsHandlers:
+            ovsHandlers[cmdname](cmd.children[0])
+        else:
+            log('unknown command, ignoring')
+
+def ovsGetCommands(options):
+    cmds = getField(options, 'Options_command_args')
+    if len(cmds.children) == 0:
+        return []
+    else:
+        first = getField(getField(cmds.children[0], 'FirstCommand'), 'OptionsCommand')
+        rest = []
+        lst = getOptField(cmds.children[0], 'SeparatedCommandsList', None)
+        if lst != None:
+            rest = getList(lst, 'OptionsCommand', 'SeparatedCommandsList')
+        return [first] + rest
+
+def ovsAddBr(cmd):
+    br = getField(cmd, 'Bridge').children[0].value
+    opvlan = getField(cmd, 'ParentVlan_opt')
+    par = None
+    vlan = None
+    if len(opvlan.children) != 0:
+        par = getField(opvlan, 'Parent').children[0].children[0].value
+        vlan = getField(opvlan, 'Vlan').children[0].children[0].value
+    log("add-br " + br + str(par) + ' ' + str(vlan))
+
+def ovsAddPort(cmd):
+    br = getField(cmd, 'Bridge').children[0].value
+    port = getField(cmd, 'Port').children[0].value
+    entries = map(lambda x: x.children[0], 
+                  filter(lambda x: len(x.children) > 0, 
+                         getFields(cmd, lambda x: x.symbol.name.startswith('TableEntry'))))
+    log("add-port " + br + ' ' + port + ' '.join(map(getTableEntry, entries)))
+
+
+def ovsSet(cmd):
+    table = getField(cmd, 'Table').children[0].value
+    record = getField(cmd, 'Record').children[0].value
+    entries = map(lambda x: x.children[0], 
+                  filter(lambda x: len(x.children) > 0, 
+                         getFields(cmd, lambda x: x.symbol.name.startswith('TableEntry'))))
+    log("set " + table + ' ' + record + ' '.join(map(getTableEntry, entries)))
+
+ovsHandlers = { 'AddBr'     : ovsAddBr 
+              , 'AddPort'   : ovsAddPort
+              , 'Set'       : ovsSet}
 
 def testIpMatch():
     """
