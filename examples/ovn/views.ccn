@@ -107,8 +107,10 @@ view LPortAtChassis( lport   : lport_id_t
                    , float   : bool)
 
 LPortAtChassis(lport, lswitch, chassis, false) :- 
-    LogicalSwitchPort(lport, lswitch, LPortVM{chassis}, _, en, _, _, _, _), en,
-    not TrunkPort(lport)
+    LogicalSwitchPort(lport, lswitch, LPortVM{}, _, en, _, _, _, _), en,
+    not TrunkPort(lport),
+    LPortBinding(lport, vport),
+    VSwitchPort(vport, _, chassis, _)
 
 LPortAtChassis(lport, lswitch, chassis, false) :- 
     LogicalSwitchPort(lport, lswitch, LPortL2Gateway{_, chassis}, _, en, _, _, _, _), en
@@ -123,7 +125,9 @@ LPortAtChassis(lport, lswitch, chassis, true)  :-
 
 LPortAtChassis(lport, lswitch, chassis, false)  :- 
     LogicalSwitchPort(lport, lswitch, LPortVIF{p, r, t}, _, en, _, _, _, _), en,
-    LogicalSwitchPort(p, _, LPortVM{chassis}, _, _, _, _, _, _)
+    LogicalSwitchPort(p, _, LPortVM{}, _, _, _, _, _, _),
+    LPortBinding(p, vport),
+    VSwitchPort(vport, _, chassis, _)
 
 // logical ports with known mac addresses at chassis (localnet and router ports are present at all chassis)
 view LPortMACChassis ( lswitch : lswitch_id_t
@@ -133,13 +137,17 @@ view LPortMACChassis ( lswitch : lswitch_id_t
                      , float   : bool)
 
 LPortMACChassis(lswitch, lport, mac, chassis, false) :- 
-    LogicalSwitchPort(lport, lswitch, LPortVM{chassis}, _, en, _, _, _, _), en,
-    LogicalSwitchPortMAC(lport, mac)
+    LogicalSwitchPort(lport, lswitch, LPortVM{}, _, en, _, _, _, _), en,
+    LogicalSwitchPortMAC(lport, mac),
+    LPortBinding(lport, vport),
+    VSwitchPort(vport, _, chassis, _)
 
 LPortMACChassis(lswitch, lport, mac, chassis, false) :- 
     LogicalSwitchPort(lport, lswitch, LPortVIF{p, r, t}, _, en, _, _, _, _), en,
-    LogicalSwitchPort(p, _, LPortVM{chassis}, _, _, _, _, _, _), 
-    LogicalSwitchPortMAC(lport, mac)
+    LogicalSwitchPort(p, _, LPortVM{}, _, _, _, _, _, _), 
+    LogicalSwitchPortMAC(lport, mac),
+    LPortBinding(p, vport),
+    VSwitchPort(vport, _, chassis, _)
 
 LPortMACChassis(lswitch, lport, mac, chassis, false) :- 
     LogicalSwitchPort(lport, lswitch, LPortL2Gateway{pnet, chassis}, _, en, _, _, _, _), en,
@@ -162,12 +170,16 @@ view LPortUnknownMACChassis ( lswitch : lswitch_id_t
                             , float   : bool)
 
 LPortUnknownMACChassis(lswitch, lport, chassis, false) :- 
-    LogicalSwitchPort(lport, lswitch, LPortVM{chassis}, _, en, _, _, u, _), en, u,
-    not TrunkPort(lport)
+    LogicalSwitchPort(lport, lswitch, LPortVM{}, _, en, _, _, u, _), en, u,
+    not TrunkPort(lport),
+    LPortBinding(lport, vport),
+    VSwitchPort(vport, _, chassis, _)
 
 LPortUnknownMACChassis(lswitch, lport, chassis, false) :- 
     LogicalSwitchPort(lport, lswitch, LPortVIF{p, r, t}, _, en, _, _, u, _), en, u,
-    LogicalSwitchPort(p, _, LPortVM{chassis}, _, _, _, _, _, _)
+    LogicalSwitchPort(p, _, LPortVM{}, _, _, _, _, _, _),
+    LPortBinding(lport, vport),
+    VSwitchPort(vport, _, chassis, _)
 
 LPortUnknownMACChassis(lport, lswitch, chassis, false) :- 
     LogicalSwitchPort(lport, lswitch, LPortL2Gateway{pnet, chassis}, _, en, _, _, u, _), en, u

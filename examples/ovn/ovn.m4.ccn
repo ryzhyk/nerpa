@@ -9,14 +9,15 @@ port PTunnelPort[TunnelPort](source tunIngress, sink)
 
 procedure vSwitchIngress(port: VSwitchPort): sink = {
     var lport : LogicalSwitchPort;
+    var lpid = the (lb in LPortBinding | lb.vport == port.id) { lb.lport};
     if (pkt.vlan.vid == 0) {
-        the (p in LogicalSwitchPort | p.id == port.lport and p.enabled) {
+        the (p in LogicalSwitchPort | p.id == lpid and p.enabled) {
             lport = p
         } default { drop }
     } else {
         // trunk port? find VIF interface; strip vlan tag
         the (p in LogicalSwitchPort | match (p.ptype) { 
-                                          LPortVIF{parent,_,tag} -> parent == port.lport and tag == pkt.vlan.vid and p.enabled,
+                                          LPortVIF{parent,_,tag} -> parent == lpid and tag == pkt.vlan.vid and p.enabled,
                                           _ -> false
                                       } ) {
             lport = p;
@@ -464,12 +465,14 @@ procedure bounce(vport: VSwitchPort, lport : LogicalSwitchPort): sink = {
 
 procedure ctlBounce(lport : lport_id_t): sink = {
     the (lp in LogicalSwitchPort | lp.id == lport) {
-        var vp: VSwitchPort;
-        vp = match (lp.ptype) {
-                LPortVIF{p,_,_} -> the (v in VSwitchPort | vp.lport == p)     { v },
-                _               -> the (v in VSwitchPort | vp.lport == lport) { v }
+        var b: LPortBinding;
+        b = match (lp.ptype) {
+                LPortVIF{p,_,_} -> the (lb in LPortBinding | lb.lport == p) { lb },
+                _               -> the (lb in LPortBinding | b.lport == lport) { lb }
         };
-        bounce(vp, lp)
+        the (vp in VSwitchPort | vp.id == b.vport) {
+            bounce(vp, lp)
+        }
     } default { drop }
 }
 
@@ -582,17 +585,14 @@ procedure deliver(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
         _ -> ()
     };
 
-    match (lport.ptype) {
-        LPortVIF{p,_,t}         -> {
-            pkt.vlan.vid = t;
-            the (vport in VSwitchPort | vport.lport == p and vport.switch == chassis) { 
-                send PVSwitchPort[vport].out 
-            }
-        },
-        _                       -> {
-            the (vport in VSwitchPort | vport.lport == lport.id and vport.switch == chassis) { 
-                send PVSwitchPort[vport].out 
-            }
+    var lp : lport_id_t;
+    lp = match (lport.ptype) {
+        LPortVIF{p,_,t}         -> { pkt.vlan.vid = t; p },  
+        _                       -> lport.id
+    };
+    the (lb in LPortBinding | lb.lport == lp) {
+        the (vport in VSwitchPort | vport.id == lb.vport and vport.switch == chassis) { 
+            send PVSwitchPort[vport].out 
         }
     }
 }

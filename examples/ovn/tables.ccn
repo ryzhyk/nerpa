@@ -38,7 +38,7 @@ typedef lswitch_type_t = LSwitchRegular
               Required.  The chassis on which the l2gateway logical port should be bound to. ovn-controller running on the defined chassis will connect this logical
               port to the physical network.
  */
-typedef lport_type_t = LPortVM { vmchassis : chassis_id_t }
+typedef lport_type_t = LPortVM {}
                      | LPortVIF { parent      : lport_id_t
                                 , tag_request : vlan_id_t
                                 , tag         : vlan_id_t }
@@ -209,7 +209,6 @@ table LogicalSwitchPort( id            : lport_id_t
                        , foreign key (ptype.rport) references LogicalRouterPort(id) 
                        , foreign key (ptype.localnet) references PhysicalNetwork(id) 
                        , foreign key (ptype.pnet) references PhysicalNetwork(id) 
-                       , foreign key (ptype.vmchassis) references Chassis(id) 
                        , foreign key (ptype.chassis) references Chassis(id) 
                        , foreign key (dhcp4_options.options) references DHCPv4Options(id) 
                        , foreign key (dhcp6_options.options) references DHCPv6Options(id) )
@@ -220,14 +219,17 @@ typedef vsport_id_t = bit<64>
 
 // one for each VM, L2Gateway port + 1 for each localnet port/chassis combination
 table VSwitchPort( id            : vsport_id_t
-                 , lport         : lport_id_t
                  , name          : string
                  , switch        : chassis_id_t
                  , portnum       : bit<16>
                  , primary key (id)
-                 , foreign key (lport) references LogicalSwitchPort(id)
                  , foreign key (switch) references Chassis(id)
                  , unique (switch, portnum) )
+
+table LPortBinding( lport : lport_id_t
+                  , vport : vsport_id_t
+                  , foreign key (lport) references LogicalSwitchPort(id)
+                  , foreign key (vport) references VSwitchPort(id) )
 
 /*
    port_security: set of strings
