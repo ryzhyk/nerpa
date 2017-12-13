@@ -51,7 +51,17 @@ Column
 ;
 
 Value
-: /(\S|[^'])+/
+: SimpleValue
+| ListValue
+;
+
+SimpleValue
+: /([^,' \r\n])+/
+;
+
+ListValue
+: SimpleValue "," SimpleValue
+| SimpleValue "," ListValue
 ;
 
 OptKey
@@ -547,9 +557,9 @@ def getExpr(expr):
     elif len(expr.children) == 6 and expr.children[3].symbol.name == "..":
         return getSymbol(expr.children[0]) + "[" + expr.children[2].value + ".." + expr.children[4].value + "]"
     elif len(expr.children) == 3 and expr.children[1].symbol.name == "BoolOp":
-        return "(" + getExpr(expr.children[0]) + expr.children[1].children[0].value + getExpr(expr.children[2]) + ")" 
+        return "(" + getExpr(expr.children[0]) + expr.children[1].children[0].value + getExpr(expr.children[2]) + ")"
     elif len(expr.children) == 3 and expr.children[1].symbol.name == "RelOp":
-        return "(" + getSymbol(expr.children[0]) + expr.children[1].children[0].value + getConst(expr.children[2]) + ")" 
+        return "(" + getSymbol(expr.children[0]) + expr.children[1].children[0].value + getConst(expr.children[2]) + ")"
     elif len(expr.children) == 1 and expr.children[0].symbol.name == "Symbol":
         return getSymbol(expr.children[0])
     elif len(expr.children) == 1 or len(expr.children) == 3:
@@ -732,8 +742,8 @@ def ovsAddBr(cmd):
 def ovsAddPort(cmd):
     br = getField(cmd, 'Bridge').children[0].value
     port = getField(cmd, 'Port').children[0].value
-    entries = map(lambda x: x.children[0], 
-                  filter(lambda x: len(x.children) > 0, 
+    entries = map(lambda x: x.children[0],
+                  filter(lambda x: len(x.children) > 0,
                          getFields(cmd, lambda x: x.symbol.name.startswith('TableEntry'))))
     log("add-port " + br + ' ' + port + ' '.join(map(getTableEntry, entries)))
 
@@ -741,12 +751,12 @@ def ovsAddPort(cmd):
 def ovsSet(cmd):
     table = getField(cmd, 'Table').children[0].value
     record = getField(cmd, 'Record').children[0].value
-    entries = map(lambda x: x.children[0], 
-                  filter(lambda x: len(x.children) > 0, 
+    entries = map(lambda x: x.children[0],
+                  filter(lambda x: len(x.children) > 0,
                          getFields(cmd, lambda x: x.symbol.name.startswith('TableEntry'))))
     log("set " + table + ' ' + record + ' '.join(map(getTableEntry, entries)))
 
-ovsHandlers = { 'AddBr'     : ovsAddBr 
+ovsHandlers = { 'AddBr'     : ovsAddBr
               , 'AddPort'   : ovsAddPort
               , 'Set'       : ovsSet}
 
