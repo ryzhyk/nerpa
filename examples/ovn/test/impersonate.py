@@ -52,16 +52,11 @@ Column
 
 Value
 : SimpleValue
-| ListValue
+| SimpleValue "," Value
 ;
 
 SimpleValue
 : /([^,' \r\n])+/
-;
-
-ListValue
-: SimpleValue "," SimpleValue
-| SimpleValue "," ListValue
 ;
 
 OptKey
@@ -534,9 +529,6 @@ def getOvsParser():
 def getField(node, field):
     return next(x for x in node.children if x.symbol.name == field)
 
-def getFields(node, f):
-    return filter(f, node.children)
-
 def getList(node, field, fields):
     if len(node.children) == 0:
         return []
@@ -593,9 +585,8 @@ def getTableEntry(entry):
     key = ""
     if len(okey.children) == 2:
         key = ":" + okey.children[1].value
-    val = getField(entry, 'Value').value
-    return col + ' ' + key + '=' + val
-
+    vals = map(lambda x: x.value, getList(getField(entry, 'Value'), 'SimpleValue', 'Value'))
+    return col + key + '=' + ",".join(vals)
 
 def getOptField(node, field, default):
     return next((x for x in node.children if x.symbol.name == field), default)
@@ -688,7 +679,7 @@ def ovnAclAdd(cmd):
 
 def ovnCreate(cmd):
     table = getField(cmd, 'Table').children[0].value
-    entries = map(lambda x: x.children[0], getFields(cmd, lambda x: x.symbol.name.startswith('TableEntry')))
+    entries = getList(getField(cmd, 'TableEntry_1'), 'TableEntry', 'TableEntry_1')
     log('create ' + table + ' ' + ' '.join(map(getTableEntry, entries)))
 
 ovnHandlers = { 'init'               : ovnInit
@@ -742,19 +733,15 @@ def ovsAddBr(cmd):
 def ovsAddPort(cmd):
     br = getField(cmd, 'Bridge').children[0].value
     port = getField(cmd, 'Port').children[0].value
-    entries = map(lambda x: x.children[0],
-                  filter(lambda x: len(x.children) > 0,
-                         getFields(cmd, lambda x: x.symbol.name.startswith('TableEntry'))))
-    log("add-port " + br + ' ' + port + ' '.join(map(getTableEntry, entries)))
+    entries = getList(getField(cmd, 'TableEntry_0'), 'TableEntry', 'TableEntry_0')
+    log("add-port " + br + ' ' + port + ' ' + ' '.join(map(getTableEntry, entries)))
 
 
 def ovsSet(cmd):
     table = getField(cmd, 'Table').children[0].value
     record = getField(cmd, 'Record').children[0].value
-    entries = map(lambda x: x.children[0],
-                  filter(lambda x: len(x.children) > 0,
-                         getFields(cmd, lambda x: x.symbol.name.startswith('TableEntry'))))
-    log("set " + table + ' ' + record + ' '.join(map(getTableEntry, entries)))
+    entries = getList(getField(cmd, 'TableEntry_1'), 'TableEntry', 'TableEntry_1')
+    log("set " + table + ' ' + record + ' ' + ' '.join(map(getTableEntry, entries)))
 
 ovsHandlers = { 'AddBr'     : ovsAddBr
               , 'AddPort'   : ovsAddPort
