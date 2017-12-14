@@ -458,7 +458,6 @@ Vals
 ;
 """ + ovnGrammar
 
-verbose = False
 logfile = open(os.environ.get("OVSHOME") + "/test.log", 'a')
 cocoon_path = os.environ.get("COCOON_PATH")
 
@@ -490,27 +489,19 @@ def parseOptions(parser, line):
     """
     Parse the command-line options using the indicated grammar.
     """
-    if verbose:
-        print "Parsing ", line
+    log("Parsing " + line)
     result = parser.parse(line)
-    if verbose:
-        print(result.tree_str())
+    log(result.tree_str())
     return result
 
 def callOriginal(options):
     """
     Relay the call to the original program.
     """
-    if verbose:
-        print "Calling ", options
+    log("Calling " + " ".join(options))
     subprocess.call(options)
 
 def main():
-    global verbose
-    if len(sys.argv) > 1:
-        verbose = False
-    else:
-        verbose = True
     impersonate = ntpath.basename(sys.argv[0])
 
     # update these with the location and names of the actual binaries
@@ -532,10 +523,11 @@ def main():
             line += " " + arg
 
         if impersonate == "ovn-nbctl":
-            impersonateOVN(line)
+            if impersonateOVN(line) == True:
+                callOriginal(sys.argv)
         else:
             impersonateOVS(line)
-        callOriginal(sys.argv)
+            callOriginal(sys.argv)
     else:
         # otherwise just run tests
         test()
@@ -714,7 +706,6 @@ def mkConst(const):
         addrs = subprocess.check_output([sys.argv[0], "--columns=addresses", "find", "Address_Set", "name=" + const.children[0].children[1].value])
         log("address list: " + addrs)
         vals = val_parser.parse(addrs[addrs.find("[") + 1 : addrs.find("]")]).children[0]
-        log("parsed values: " + vals.tree_str())
         return map(lambda x: mkAddress(x.value[1:-1]), getList(vals, 'SimpleValue', 'Value'))
     else:
         raise Exception('Invalid constant ' + const.tree_str())
@@ -820,7 +811,7 @@ def impersonateOVN(line):
     else:
         log('command symbol: ' + cmd.symbol.name)
         if cmd.symbol.name in ovnHandlers:
-            ovnHandlers[cmd.symbol.name](cmd)
+            return ovnHandlers[cmd.symbol.name](cmd)
         else:
             log('unknown command, ignoring')
 
@@ -833,12 +824,14 @@ def ovnGetCommand(options):
 
 def ovnInit(cmd):
     log('init: nothing to do here')
+    return False
 
 def ovnLsAdd(cmd):
     swopt = getField(cmd, 'Switch_opt')
     swname = getField(swopt, 'Switch').children[0].value
     log('adding switch ' + swname)
     cocoon('LogicalSwitch.put(LogicalSwitch{' + mkId(swname, 8) + ', LSwitchRegular, "' + swname + '", NoSubnet})')
+    return False
 
 def ovnLspAdd(cmd):
     sw = getField(cmd, 'Switch').children[0].value
@@ -856,6 +849,7 @@ def ovnLspAdd(cmd):
         zone = port.translate(None, string.ascii_letters)
         cocoon('LogicalSwitchPort.put(LogicalSwitchPort{' + 
                  ', '.join([mkId(port, 8), mkId(sw, 8), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', zone]) + '})')
+    return False
 
 def ovnLspSetAddresses(cmd):
     port = getField(cmd, 'Port').children[0].value
@@ -880,6 +874,7 @@ def ovnLspSetAddresses(cmd):
             log("ips: " + str(ips))
             for ip in ips:
                 cocoon("LogicalSwitchPortIP.put(LogicalSwitchPortIP{" + mkId(port, 8) + ", " + mac + ", " + ip + "})")
+    return False
 
 def addrStr(addr):
     if addr.children[0].symbol.name == "unknown":
@@ -912,6 +907,7 @@ def ovnLspSetPortSecurity(cmd):
         log("subnets: " + str(subnets))
         for subnet in subnets:
             cocoon("PortsecurityIP.put(PortSecurityIP{" + mkId(port, 8) + ", " + mac + ", " + subnet + "})")
+    return False
 
 
 def ovnAclAdd(cmd):
@@ -922,11 +918,13 @@ def ovnAclAdd(cmd):
     verdict   = mkVerdict(getField(cmd, 'Verdict').children[0].value)
     log('acl-add ' + ' '.join([sw, direction, prio, match, verdict]))
     cocoon("ACL.put(ACL{" + ", ".join([mkId(sw, 8), prio, direction, "\\(p:Packet, lp:lport_id_t): bool =" + match, verdict])  + "})")
+    return False
 
 def ovnCreate(cmd):
     table = getField(cmd, 'Table').children[0].value
     entries = getList(getField(cmd, 'TableEntry_1'), 'TableEntry', 'TableEntry_1')
     log('create ' + table + ' ' + ' '.join(map(getTableEntry, entries)))
+    return True
 
 ovnHandlers = { 'init'               : ovnInit
               , 'LsAdd'              : ovnLsAdd
