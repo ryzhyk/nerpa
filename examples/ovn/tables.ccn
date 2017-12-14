@@ -3,6 +3,9 @@ include(`packet.ccn')
 typedef opt_subnet_t = SomeSubnet { subnet : ip_subnet_t }
                      | NoSubnet
 
+typedef opt_ip_addr_t = SomeIPAddr { addr : ip_addr_t }
+                      | NoIPAddr
+
 typedef lswitch_type_t = LSwitchRegular
                        | LSwitchBridged
 
@@ -139,9 +142,8 @@ typedef dynaddr_id_t = bit<64>
 
 table LogicalSwitchPortDynAddr( id    : dynaddr_id_t
                               , lport : lport_id_t
-                              , mac   : mac_addr_t  // dynamically allocated
-                              , ip    : ip_addr_t   // dynamically allocated
-                              , primary key (id)
+                              , mac   : mac_addr_t      // dynamically allocated
+                              , ip    : opt_ip_addr_t   // dynamically allocated
                               , foreign key (lport) references LogicalSwitchPort(id)
                               , unique (mac)
                               , unique (lport, ip) )
