@@ -199,7 +199,7 @@ execExpr e ref = do
                                        (do _ <- _commitNotify s
                                            return ()
                                         `catch` \ex -> do 
-                                            _rollback s
+                                            _rollback s `catch` (\e' -> putStrLn $ "Rollback failed: " ++ show (e'::SomeException))
                                             throw (ex::SomeException))
                                        return $ intercalate ",\n" $ map show $ vals ++ [val]
         _ -> error "execExpr called in disconnected state"
