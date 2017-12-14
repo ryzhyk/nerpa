@@ -14,6 +14,8 @@ import parglare   # parser generator
 import ntpath
 import ipaddress
 import os
+import string
+import netaddr
 
 # These are grammars in the parglare parser generator syntax for
 # parsing (a subset of) the ovn-nbctl/ovs-vsctl command-line
@@ -451,7 +453,16 @@ Record
 """
 
 verbose = False
-logfile = open(os.environ.get("HOME") + "/test.log", 'a')
+logfile = open(os.environ.get("OVSHOME") + "/test.log", 'a')
+cocoon_path = os.environ.get("COCOON_PATH")
+
+
+def cocoon(cmd):
+    log("cocoon command: " + cmd)
+    proc = subprocess.Popen([cocoon_path, "--action=cmd"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (out, err) = proc.communicate(cmd)
+    log("cocoon stdout: " + out)
+    log("cocoon stderr: " + err)
 
 def log(str):
     logfile.write(str + '\n')
@@ -541,23 +552,155 @@ def getList(node, field, fields):
             fs = getList(tail, field, fields)
             return [f] + fs
 
-def getExpr(expr):
+def mkExpr(expr):
     if expr.children[0].symbol.name == "!":
-        return "(!" + getExpr(expr.children[1]) + ")"
+        return "(not" + mkExpr(expr.children[1]) + ")"
     elif len(expr.children) == 4 and expr.children[1].symbol.name == "[":
-        return getSymbol(expr.children[0]) + "[" + expr.children[2].value +  "]"
+        return mkSymbol(expr.children[0]) + "[" + expr.children[2].value + ":" + expr.children[2].value + "]"
     elif len(expr.children) == 6 and expr.children[3].symbol.name == "..":
-        return getSymbol(expr.children[0]) + "[" + expr.children[2].value + ".." + expr.children[4].value + "]"
+        return mkSymbol(expr.children[0]) + "[" + expr.children[4].value + ":" + expr.children[2].value + "]"
     elif len(expr.children) == 3 and expr.children[1].symbol.name == "BoolOp":
-        return "(" + getExpr(expr.children[0]) + expr.children[1].children[0].value + getExpr(expr.children[2]) + ")"
+        return "(" + mkExpr(expr.children[0]) + mkBoolOp(expr.children[1].children[0].value) + mkExpr(expr.children[2]) + ")"
     elif len(expr.children) == 3 and expr.children[1].symbol.name == "RelOp":
-        return "(" + getSymbol(expr.children[0]) + expr.children[1].children[0].value + getConst(expr.children[2]) + ")"
+        return "(" + mkRelExpr(expr.children[0], expr.children[1].children[0].value, expr.children[2]) + ")"
     elif len(expr.children) == 1 and expr.children[0].symbol.name == "Symbol":
-        return getSymbol(expr.children[0])
+        return mkBoolSymbol(expr.children[0])
     elif len(expr.children) == 1 or len(expr.children) == 3:
-        return getExpr(getField(expr, 'Expression'))
+        return mkExpr(getField(expr, 'Expression'))
     else:
         raise Exception('Invalid expression ' + expr.tree_str())
+
+def mkBoolOp(op):
+    if op == "&&":
+        return "and"
+    elif op == "||":
+        return "or"
+    else:
+        raise Exception("unsupported boolean operation: " + op)
+
+def mkRelOp(op):
+    return  op
+
+matchIP4 = ["EthPacket{_,_,_,_,_,_,EthIP4{ip4}}"]
+matchIP6 = ["EthPacket{_,_,_,_,_,_,EthIP6{ip6}}"]
+matchARP = ["EthPacket{_,_,_,_,_,_,EthARP{arp}}"]
+matchTCP = [ "EthPacket{_,_,_,_,_,_,EthIP4{_,_,_,_,_,_,_,_,_,_,IPTCP{tcp}}}"
+           , "EthPacket{_,_,_,_,_,_,EthIP6{_,_,_,_,_,_,_,IPTCP{tcp}}}"]
+matchUDP = [ "EthPacket{_,_,_,_,_,_,EthIP4{_,_,_,_,_,_,_,_,_,_,IPUDP{udp}}}"
+           , "EthPacket{_,_,_,_,_,_,EthIP6{_,_,_,_,_,_,_,IPUDP{udp}}}"]
+matchICMP4 = ["EthPacket{_,_,_,_,_,_,EthIP4{_,_,_,_,_,_,_,_,_,_,IPICMP4{icmp}}}"]
+matchICMP6 = ["EthPacket{_,_,_,_,_,_,EthIP6{_,_,_,_,_,_,_,IPICMP6{icmp}}}"]
+
+symTable = { 'inport'         : [("p.portnum"                        , None)]
+#           , 'flags.loopback' :
+           , 'eth.src'        : [("p.src"                            , None)]
+           , 'eth.dst'        : [("p.dst"                            , None)]
+           , 'eth.type'       : [("p.ethtype"                        , None)]
+#           , 'vlan.tci'       : 
+           , 'vlan.vid'       : [("p.vlan.vid"                       , None)]
+           , 'vlan.pcp'       : [("p.vlan.pcp"                       , None)]
+           , 'ip.proto'       : [("ip4.proto"                        , matchIP4)
+                                ,("ip6.proto"                        , matchIP6)]
+           , 'ip4.src'        : [("ip4.src"                          , matchIP4)]
+           , 'ip4.dst'        : [("ip4.dst"                          , matchIP4)]
+           , 'ip6.src'        : [("ip6.src"                          , matchIP6)]
+           , 'ip6.dst'        : [("ip6.dst"                          , matchIP6)]
+           , 'ip6.label'      : [("ip6.label"                        , matchIP6)]
+#           , 'arp.op'         : []
+           , 'arp.spa'        : [("arp.spa"                          , matchARP)]
+           , 'arp.tpa'        : [("arp.tpa"                          , matchARP)]
+           , 'arp.sha'        : [("arp.sha"                          , matchARP)]
+           , 'arp.tha'        : [("arp.tha"                          , matchARP)]
+           , 'tcp.src'        : [("tcp.src"                          , matchTCP)]
+           , 'tcp.dst'        : [("tcp.dst"                          , matchTCP)]
+           , 'udp.src'        : [("udp.src"                          , matchUDP)]
+           , 'udp.dst'        : [("udp.dst"                          , matchUDP)]
+           , 'icmp4.type'     : [("icmp.type"                        , matchICMP4)]
+           , 'icmp4.code'     : [("icmp.code"                        , matchICMP4)]
+           , 'icmp6.type'     : [("icmp.type"                        , matchICMP6)]
+           , 'icmp6.code'     : [("icmp.code"                        , matchICMP6)]
+#           , 'nd.target'      :
+#           , 'nd.sll'         :
+#           , 'nd.tll'         :
+#           , 'ct_mark'        :
+#           , 'ct_label'       :
+#           , 'ct.trk'         :  
+#           , 'ct.new'         :
+#           , 'ct.est'         :
+#           , 'ct.rel'         :
+#           , 'ct.rpl'         :
+#           , 'ct.inv'         :
+
+           , 'eth.bcast'      : [("p.dst == 48'hffffffffffff"       , None)]
+           , 'eth.mcast'      : [("p.dst[40:40] == 1"               , None)]
+#           , 'vlan.present'   : 
+           , 'ip4'            : [("true"                            , matchIP4)]
+           , 'ip4.mcast'      : [("ip4.dst[31:28] == 4'he"          , matchIP4)]
+           , 'ip6'            : [("true"                            , matchIP6)]
+           , 'ip'             : [("true"                            , matchIP4) 
+                                ,("true"                            , matchIP6)]
+           , 'icmp4'          : [("true"                            , matchICMP4)]
+           , 'icmp6'          : [("true"                            , matchICMP6)]
+           , 'icmp'           : [("true"                            , matchICMP4)
+                                ,("true"                            , matchICMP6)]
+           , 'arp'            : [("true"                            , matchARP)]
+#           , 'nd'             :
+#           , 'nd_ns'          :
+#           , 'nd_na'          :
+           , 'tcp'            : [("true"                            , matchTCP)]
+           , 'udp'            : [("true"                            , matchUDP)]
+#           , 'sctp'           :
+           }
+
+def mkBoolSymbol(sym):
+    s = getSymbol(sym)
+    if s in symTable:
+        matches = []
+        for (e, ms) in symTable[s]:
+            if ms == None:
+                return e
+            else:
+                for m in ms:
+                    matches = matches + [m + ": " + e]
+        return "match (p{)" + ", ".join(matches) + ", _ -> false}"
+    else:
+        raise Exception("unsupported symbol: " + s)
+
+def mkRelExpr(sym, op, const):
+    o = mkRelOp(op)
+    c = mkConst(const)
+    s = getSymbol(sym)
+    if s == "inport":
+        return "lp" + o + mkId(c[1:-1],8)
+    if s == "outport" and o == "==":
+        return "lp" + o + mkId(c[1:-1],8)
+
+    if s in symTable:
+        matches = []
+        for (e, ms) in symTable[s]:
+            if ms == None:
+                return e + o + c
+            else:
+                for m in ms:
+                    matches = matches + [m + ": " + e + o + c]
+        return "match (p{)" + ", ".join(matches) + ", _ -> false}"
+    else:
+        raise Exception("unsupported symbol: " + s)
+
+def mkConst(const):
+    sym = const.children[0].symbol.name
+    if sym == 'Number':
+        return "'h%x" % int(const.children[0].children[0].value, 0)
+    elif sym == '{':
+        raise Exception("not implemented: mkConst ConstantList")
+#        return map(lambda x: x.children[0].children[0].value , getList(const.children[1], 'SimpleConstant', 'ConstantList'))
+    elif sym == 'String':
+        return const.children[0].value
+    elif sym == 'VariableName':
+        raise Exception("not implemented: mkConst VariableName")
+#        return '$' + const.children[0].children[1].value
+    else:
+        raise Exception('Invalid constant ' + const.tree_str())
 
 def getSymbol(sym):
     if sym.children[0].symbol.name == 'Identifier':
@@ -578,6 +721,50 @@ def getConst(const):
     else:
         raise Exception('Invalid constant ' + const.tree_str())
 
+def mkVerdict(v):
+    if v == "allow":
+        return "ACLAllow"
+    elif v == "reject":
+        return "ACLReject"
+    elif v == "deny":
+        return "ACLReject"
+    elif v == "drop":
+        return "ACLDrop"
+    elif v == "allow-related":
+        return "ACLAllowRelated"
+
+def mkDirection(d):
+    if d == "from-lport":
+        return "ACLFrom"
+    elif d == "to-lport":
+        return "ACLTo"
+    else:
+        raise Exception("unsupported ACL direction :" + d)
+
+def mkId(swname, w):
+    if len(swname) > w:
+        raise Except("mkId(" + swname + "," + str(w) + "): identifier too long")
+    return str(w*8)+ "'h" + "".join(map(lambda x: "%02x"%x, map(ord, list(swname))))
+
+def mkMACAddr(mac):
+    return "48'h%x" % int(netaddr.EUI(mac)) 
+
+def mkIPAddr(ip):
+    if ip.children[0].symbol.name == 'Ipv4Address':
+        return "IPAddr4{32'h%x}" % netaddr.IPNetwork(ip.children[0].children[0].value).ip
+    elif ip.children[0].symbol.name == 'Ipv6Address':
+        return "IPAddr6{128'h%x}" % netaddr.IPNetwork(ip.children[0].children[0].value).ip
+    else: 
+        raise Exception("not implemented: mkIPAddr " + ip.children[0].symbol.name)
+
+def mkIPSubnet(ip):
+    net = netaddr.IPNetwork(ip.children[0].children[0].value)
+    if ip.children[0].symbol.name == 'Ipv4Address':
+        return "IPSubnet4{IP4Subnet{32'h%x/%d}}" % (net.ip, net.prefixlen)
+    elif ip.children[0].symbol.name == 'Ipv6Address':
+        return "IPSubnet6{IP6Subnet{128'h%x/%d}}" % (net.ip, net.prefixlen)
+    else: 
+        raise Exception("not implemented: mkIPAddr " + ip.children[0].symbol.name)
 
 def getTableEntry(entry):
     col = getField(entry, 'Column').children[0].value
@@ -624,6 +811,7 @@ def ovnLsAdd(cmd):
     swopt = getField(cmd, 'Switch_opt')
     swname = getField(swopt, 'Switch').children[0].value
     log('adding switch ' + swname)
+    cocoon('LogicalSwitch.put(LogicalSwitch{' + mkId(swname, 8) + ', LSwitchRegular, "' + swname + '", NoSubnet})')
 
 def ovnLspAdd(cmd):
     sw = getField(cmd, 'Switch').children[0].value
@@ -634,14 +822,37 @@ def ovnLspAdd(cmd):
     if partag != None:
         par = getField(partag, 'Parent').children[0].value
         tag = getField(partag, 'TagRequest').children[0].value
-    log('adding switch port ' + sw + ' ' + port + ' ' + str(par) + ' ' + str(tag))
+        raise Exception('not implemented: VIF ports')
+    else:
+        log('adding switch port ' + sw + ' ' + port)
+        # XXX: hack: we currently don't have a way to generate unique zone id's
+        zone = port.translate(None, string.ascii_letters)
+        cocoon('LogicalSwitchPort.put(LogicalSwitchPort{' + 
+                 ', '.join([mkId(port, 8), mkId(sw, 8), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', zone]) + '})')
 
 def ovnLspSetAddresses(cmd):
     port = getField(cmd, 'Port').children[0].value
     addrs = getList(getField(cmd, 'Addresses'), 'Address', 'Addresses')
     addr_strs = map(addrStr, addrs)
-    #for addr in addrs:
     log('adding switch port addresses ' + port + ' ' + ','.join(addr_strs))
+    for addr in addrs:
+        addrtype = addr.children[0].symbol.name
+        if addrtype == "unknown":
+            cocoon("the (lp in LogicalSwitchPort | lp.id == " + mkId(port, 8)+ ") {LogicalSwitchPort.delete(?.id == lp.id); lp.unknown_addr=true; LogicalSwitchPort.put(lp)}")
+        elif addrtype == "dynamic":
+            #cocoon("LogicalSwitchPortDynAddr.put(LogicalSwitchPortDynAddr{" + ", ".join([???, mkId(port, 8), "0", "NoIPAddr"]) + "})")
+            raise Exception("not implemented: lsp-set-addresses dynamic")
+        elif addrtype == "router":
+            raise Exception("not implemented: lsp-set-addresses router")
+        else:
+            mac = mkMACAddr(getField(addr, 'EthAddress').value)
+            cocoon("LogicalSwitchPortMAC.put(LogicalSwitchPortMAC{" + mkId(port, 8) + ", " + mac + "})")
+            ips = map(mkIPAddr, 
+                      filter(lambda x: x.children[0].symbol.name != "invalid", 
+                             getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList')))
+            log("ips: " + str(ips))
+            for ip in ips:
+                cocoon("LogicalSwitchPortIP.put(LogicalSwitchPortIP{" + mkId(port, 8) + ", " + mac + ", " + ip + "})")
 
 def addrStr(addr):
     if addr.children[0].symbol.name == "unknown":
@@ -667,15 +878,23 @@ def ovnLspSetPortSecurity(cmd):
     addr_strs = map(addrStr, addrs)
     #for addr in addrs:
     log('lsp-set-port-security ' + port + ' ' + ','.join(addr_strs))
+    for addr in addrs:
+        mac = mkMACAddr(getField(addr, 'EthAddress').value)
+        cocoon("PortSecurityMAC.put(PortSecurityMAC{" + mkId(port, 8) + ", " + mac + "})")
+        subnets = map(mkIPSubnet, getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList'))
+        log("subnets: " + str(subnets))
+        for subnet in subnets:
+            cocoon("PortsecurityIP.put(PortSecurityIP{" + mkId(port, 8) + ", " + mac + ", " + subnet + "})")
+
 
 def ovnAclAdd(cmd):
     sw        = getField(cmd, 'Switch').children[0].value
-    direction = getField(cmd, 'Direction').children[0].value
+    direction = mkDirection(getField(cmd, 'Direction').children[0].value)
     prio      = getField(cmd, 'Priority').children[0].children[0].value
-    match     = getExpr(getField(cmd, 'Match').children[0])
-    verdict   = getField(cmd, 'Verdict').children[0].value
+    match     = mkExpr(getField(cmd, 'Match').children[0])
+    verdict   = mkVerdict(getField(cmd, 'Verdict').children[0].value)
     log('acl-add ' + ' '.join([sw, direction, prio, match, verdict]))
-
+    cocoon("ACL.put(ACL{" + ", ".join([mkId(sw, 8), prio, direction, "\\(p:Packet, lp:lport_id_t): bool =" + match, verdict])  + "})")
 
 def ovnCreate(cmd):
     table = getField(cmd, 'Table').children[0].value
