@@ -1,7 +1,7 @@
 typedef mac_addr_t = bit<48>
 
-function ethUnicastAddr(addr: mac_addr_t): bool   = addr[0:0] == 0
-function ethMulticastAddr(addr: mac_addr_t): bool = addr[0:0] == 1
+function ethUnicastAddr(addr: mac_addr_t): bool   = addr[40:40] == 0
+function ethMulticastAddr(addr: mac_addr_t): bool = addr[40:40] == 1
 function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
 
 typedef ip4_addr_t = bit<32>
@@ -32,6 +32,7 @@ typedef eth_pkt_t = EthPacket { vxlan   : vxlan_t
                               , dst     : mac_addr_t
                               , vlan    : vlan_t
                               , ct      : conn_track_t
+                              , ethtype : bit<16>
                               , payload : eth_payload_t}
 
 function pktIsIP(p: eth_pkt_t) : bool = 
