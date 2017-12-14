@@ -452,10 +452,21 @@ Record
 ;
 """
 
+valGrammar = """
+Vals
+: Value
+;
+""" + ovnGrammar
+
 verbose = False
 logfile = open(os.environ.get("OVSHOME") + "/test.log", 'a')
 cocoon_path = os.environ.get("COCOON_PATH")
 
+def getValueParser():
+    g = parglare.Grammar.from_string(valGrammar)
+    return parglare.Parser(g, build_tree=True)
+
+val_parser = getValueParser()
 
 def cocoon(cmd):
     log("cocoon command: " + cmd)
@@ -662,43 +673,49 @@ def mkBoolSymbol(sym):
             else:
                 for m in ms:
                     matches = matches + [m + ": " + e]
-        return "match (p{)" + ", ".join(matches) + ", _ -> false}"
+        return "match (p){" + ", ".join(matches + ["_ -> false"]) + "}"
     else:
         raise Exception("unsupported symbol: " + s)
 
 def mkRelExpr(sym, op, const):
     o = mkRelOp(op)
-    c = mkConst(const)
+    cs = mkConst(const)
     s = getSymbol(sym)
-    if s == "inport":
-        return "lp" + o + mkId(c[1:-1],8)
-    if s == "outport" and o == "==":
-        return "lp" + o + mkId(c[1:-1],8)
-
-    if s in symTable:
-        matches = []
-        for (e, ms) in symTable[s]:
-            if ms == None:
-                return e + o + c
+    exprs = []
+    for c in cs:
+        expr = ""
+        if s == "inport":
+            expr =  "lp" + o + mkId(c[1:-1],8)
+        elif s == "outport" and o == "==":
+            expr = "lp" + o + mkId(c[1:-1],8)
+        elif s in symTable:
+            if len(symTable[s]) == 1 and symTable[s][0][1] == None:
+                expr = "(" + symTable[s][0][0] + o + c + ")"
             else:
-                for m in ms:
-                    matches = matches + [m + ": " + e + o + c]
-        return "match (p{)" + ", ".join(matches) + ", _ -> false}"
-    else:
-        raise Exception("unsupported symbol: " + s)
+                matches = []
+                for (e, ms) in symTable[s]:
+                    for m in ms:
+                        matches = matches + [m + ": " + e + o + c]
+                expr = "match (p){" + ", ".join(matches + ["_ -> false"]) + "}"
+        else:
+            raise Exception("unsupported symbol: " + s)
+        exprs = exprs + [expr]
+    return " or ".join(exprs)
 
 def mkConst(const):
     sym = const.children[0].symbol.name
     if sym == 'Number':
-        return "'h%x" % int(const.children[0].children[0].value, 0)
+        return ["'h%x" % int(const.children[0].children[0].value, 0)]
     elif sym == '{':
-        raise Exception("not implemented: mkConst ConstantList")
-#        return map(lambda x: x.children[0].children[0].value , getList(const.children[1], 'SimpleConstant', 'ConstantList'))
+        return map(lambda x: "'h%x" % int(x.children[0].children[0].value, 0) , getList(const.children[1], 'SimpleConstant', 'ConstantList'))
     elif sym == 'String':
-        return const.children[0].value
+        return [const.children[0].value]
     elif sym == 'VariableName':
-        raise Exception("not implemented: mkConst VariableName")
-#        return '$' + const.children[0].children[1].value
+        addrs = subprocess.check_output([sys.argv[0], "--columns=addresses", "find", "Address_Set", "name=" + const.children[0].children[1].value])
+        log("address list: " + addrs)
+        vals = val_parser.parse(addrs[addrs.find("[") + 1 : addrs.find("]")]).children[0]
+        log("parsed values: " + vals.tree_str())
+        return map(lambda x: mkAddress(x.value[1:-1]), getList(vals, 'SimpleValue', 'Value'))
     else:
         raise Exception('Invalid constant ' + const.tree_str())
 
@@ -756,6 +773,16 @@ def mkIPAddr(ip):
         return "IPAddr6{128'h%x}" % netaddr.IPNetwork(ip.children[0].children[0].value).ip
     else: 
         raise Exception("not implemented: mkIPAddr " + ip.children[0].symbol.name)
+
+def mkAddress(addr):
+    if netaddr.valid_mac(addr):
+        return mkMACAddr(addr)
+    elif netaddr.valid_ipv4(addr):
+        return "IPAddr4{32'h%x}" % netaddr.IPAddr(addr)
+    elif netaddr.valid_ipv6(addr):
+        return "IPAddr6{128'h%x}" % netaddr.IPAddr(addr)
+    else: 
+        raise Exception("unknown address format " + addr)
 
 def mkIPSubnet(ip):
     net = netaddr.IPNetwork(ip.children[0].children[0].value)
