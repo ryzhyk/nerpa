@@ -155,7 +155,9 @@ mkMatch OF.Match{..} = map (\m -> pp n <> "=" <> mkVal attrFormat matchVal <> m)
     where n = case M.lookup (OF.fieldName matchField) matchMap  of
                    Nothing -> error $ "OVS.mkMatch: unknown field " ++ OF.fieldName matchField
                    Just x  -> x
-          Attributes{..} = matchAttributes M.! n
+          Attributes{..} = case M.lookup n matchAttributes of
+                                Nothing -> error $ "OVS.mkMatch: unknown field attributes " ++ n
+                                Just x  -> x
           masks = case matchMask of
                        Nothing                             -> [empty]
                        Just m | OF.isFullMask matchField m -> [empty]

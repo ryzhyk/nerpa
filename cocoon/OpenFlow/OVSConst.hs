@@ -339,6 +339,8 @@ matchAttributes = M.fromList
                   , ("udp_dst"    , Attributes True  Hex)
                   , ("icmp_type"  , Attributes False Dec)
                   , ("icmp_code"  , Attributes False Dec)
+                  , ("icmp6_type" , Attributes False Dec)
+                  , ("icmp6_code" , Attributes False Dec)
                   , ("nd_target"  , Attributes True  IP6)
                   , ("nd_sll"     , Attributes True  MAC)
                   , ("nd_tll"     , Attributes True  MAC)
