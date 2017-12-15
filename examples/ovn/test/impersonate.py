@@ -521,12 +521,7 @@ def main():
     currentParser = None
     originalCommand = None
     ovsHome = os.environ.get("OVSHOME")
-    if impersonate == "ovn-nbctl":
-        originalCommand = ovsHome + "ovn/utilities/ovn-nbctl"
-    elif impersonate == "ovs-vsctl":
-        originalCommand = ovsHome + "utilities/ovs-vsctl"
 
-    sys.argv[0] = originalCommand
     if len(sys.argv) > 1:
         # Given arguments start impersonating the respective binary
         line = ""
@@ -537,9 +532,13 @@ def main():
 
         if impersonate == "ovn-nbctl":
             if impersonateOVN(line) == True:
+                originalCommand = ovsHome + "ovn/utilities/ovn-nbctl"
+                sys.argv[0] = originalCommand
                 callOriginal(sys.argv)
         elif impersonate == "ovs-vsctl":
-            callOriginal(sys.argv)
+            originalCommand = ovsHome + "utilities/ovs-vsctl"
+            options = [originalCommand] + sys.argv[1:]
+            callOriginal(options)
             impersonateOVS(line)
         elif impersonate == "ovn-controller":
             # just block ovn-controller invocation
@@ -719,7 +718,7 @@ def mkConst(const):
     elif sym == 'String':
         return [const.children[0].value]
     elif sym == 'VariableName':
-        addrs = subprocess.check_output([sys.argv[0], "--columns=addresses", "find", "Address_Set", "name=" + const.children[0].children[1].value])
+        addrs = ovs_vsctl(["--columns=addresses", "find", "Address_Set", "name=" + const.children[0].children[1].value])
         log("address list: " + addrs)
         vals = val_parser.parse(addrs[addrs.find("[") + 1 : addrs.find("]")]).children[0]
         return map(lambda x: mkAddress(x.value[1:-1]), getList(vals, 'SimpleValue', 'Value'))
@@ -1000,8 +999,10 @@ def ovsAddBr(cmd):
         raise Exception("not supported: fake bridges")
     log("add-br " + br + str(par) + ' ' + str(vlan))
     if br == "br-int":
+        ovs_vsctl(["set", "bridge", br, "protocols=OpenFlow13,OpenFlow15"])
         hypervisor = getHyhpervisor()
-        cocoon("Chassis.put(Chassis{" + ", ".join([mkId(hypervisor, 8), "false", '"' + br + '"', '""'])  + "})")
+        server = '"unix:' + ovs_rundir + '/' + br + '.mgmt' + '"'
+        cocoon("Chassis.put(Chassis{" + ", ".join([mkId(hypervisor, 8), "false", server, '""'])  + "})")
     else:
         log("cocoon does not care about this bridge")
 
