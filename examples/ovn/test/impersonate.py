@@ -460,6 +460,11 @@ Vals
 
 logfile = open(os.environ.get("OVSHOME") + "/test.log", 'a')
 cocoon_path = os.environ.get("COCOON_PATH")
+ovs_rundir = os.environ.get("OVS_RUNDIR")
+
+def getHyhpervisor():
+    return os.path.basename(os.path.normpath(ovs_rundir))
+
 
 def getValueParser():
     g = parglare.Grammar.from_string(valGrammar)
@@ -473,6 +478,14 @@ def cocoon(cmd):
     (out, err) = proc.communicate(cmd)
     log("cocoon stdout: " + out)
     log("cocoon stderr: " + err)
+
+def ovs_vsctl(cmd):
+    ovsHome = os.environ.get("OVSHOME")
+    ovs = ovsHome + "utilities/ovs-vsctl"
+    log("ovs_vsctl command: " + " ".join(cmd))
+    output = subprocess.check_output([ovs] + cmd).strip()
+    log("ovs_vsctl output: " + output)
+    return output
 
 def log(str):
     logfile.write(str + '\n')
@@ -510,7 +523,7 @@ def main():
     ovsHome = os.environ.get("OVSHOME")
     if impersonate == "ovn-nbctl":
         originalCommand = ovsHome + "ovn/utilities/ovn-nbctl"
-    else:
+    elif impersonate == "ovs-vsctl":
         originalCommand = ovsHome + "utilities/ovs-vsctl"
 
     sys.argv[0] = originalCommand
@@ -525,9 +538,12 @@ def main():
         if impersonate == "ovn-nbctl":
             if impersonateOVN(line) == True:
                 callOriginal(sys.argv)
-        else:
-            impersonateOVS(line)
+        elif impersonate == "ovs-vsctl":
             callOriginal(sys.argv)
+            impersonateOVS(line)
+        elif impersonate == "ovn-controller":
+            # just block ovn-controller invocation
+            return
     else:
         # otherwise just run tests
         test()
@@ -751,7 +767,7 @@ def mkDirection(d):
 
 def mkId(swname, w):
     if len(swname) > w:
-        raise Except("mkId(" + swname + "," + str(w) + "): identifier too long")
+        raise Exception("mkId(" + swname + "," + str(w) + "): identifier too long")
     return str(w*8)+ "'h" + "".join(map(lambda x: "%02x"%x, map(ord, list(swname))))
 
 def mkMACAddr(mac):
@@ -769,9 +785,9 @@ def mkAddress(addr):
     if netaddr.valid_mac(addr):
         return mkMACAddr(addr)
     elif netaddr.valid_ipv4(addr):
-        return "IPAddr4{32'h%x}" % netaddr.IPAddr(addr)
+        return "IPAddr4{32'h%x}" % netaddr.IPAddress(addr)
     elif netaddr.valid_ipv6(addr):
-        return "IPAddr6{128'h%x}" % netaddr.IPAddr(addr)
+        return "IPAddr6{128'h%x}" % netaddr.IPAddress(addr)
     else: 
         raise Exception("unknown address format " + addr)
 
@@ -782,16 +798,25 @@ def mkIPSubnet(ip):
     elif ip.children[0].symbol.name == 'Ipv6Address':
         return "IPSubnet6{IP6Subnet{128'h%x/%d}}" % (net.ip, net.prefixlen)
     else: 
-        raise Exception("not implemented: mkIPAddr " + ip.children[0].symbol.name)
+        raise Exception("not implemented: mkIPSubnet " + ip.children[0].symbol.name)
 
 def getTableEntry(entry):
     col = getField(entry, 'Column').children[0].value
     okey = getField(entry, 'OptKey')
-    key = ""
+    key = None
     if len(okey.children) == 2:
-        key = ":" + okey.children[1].value
+        key = okey.children[1].value
     vals = map(lambda x: x.value, getList(getField(entry, 'Value'), 'SimpleValue', 'Value'))
-    return col + key + '=' + ",".join(vals)
+    return (col, key, vals)
+
+def formatTableEntry(e):
+    (col, key, vals) = getTableEntry(e)
+    skey = ""
+    if key == None:
+        skey = ""
+    else:
+        skey = ":" + key
+    return col + skey + '=' + ",".join(vals)
 
 def getOptField(node, field, default):
     return next((x for x in node.children if x.symbol.name == field), default)
@@ -923,7 +948,7 @@ def ovnAclAdd(cmd):
 def ovnCreate(cmd):
     table = getField(cmd, 'Table').children[0].value
     entries = getList(getField(cmd, 'TableEntry_1'), 'TableEntry', 'TableEntry_1')
-    log('create ' + table + ' ' + ' '.join(map(getTableEntry, entries)))
+    log('create ' + table + ' ' + ' '.join(map(formatTableEntry, entries)))
     return True
 
 ovnHandlers = { 'init'               : ovnInit
@@ -972,20 +997,60 @@ def ovsAddBr(cmd):
     if len(opvlan.children) != 0:
         par = getField(opvlan, 'Parent').children[0].children[0].value
         vlan = getField(opvlan, 'Vlan').children[0].children[0].value
+        raise Exception("not supported: fake bridges")
     log("add-br " + br + str(par) + ' ' + str(vlan))
+    if br == "br-int":
+        hypervisor = getHyhpervisor()
+        cocoon("Chassis.put(Chassis{" + ", ".join([mkId(hypervisor, 8), "false", '"' + br + '"', '""'])  + "})")
+    else:
+        log("cocoon does not care about this bridge")
 
 def ovsAddPort(cmd):
     br = getField(cmd, 'Bridge').children[0].value
     port = getField(cmd, 'Port').children[0].value
     entries = getList(getField(cmd, 'TableEntry_0'), 'TableEntry', 'TableEntry_0')
-    log("add-port " + br + ' ' + port + ' ' + ' '.join(map(getTableEntry, entries)))
+    log("add-port " + br + ' ' + port + ' ' + ' '.join(map(formatTableEntry, entries)))
+    if br == "br-int":
+        hypervisor = getHyhpervisor()
+        pnum = ovs_vsctl(["get", "Interface", port, "ofport"])
+        cocoon("VSwitchPort.put(VSwitchPort{" + ", ".join([mkId(port, 8), '"' + port + '"', mkId(hypervisor, 8), pnum])  + "})")
+    else:
+        log("cocoon does not care about this port")
+
 
 
 def ovsSet(cmd):
     table = getField(cmd, 'Table').children[0].value
     record = getField(cmd, 'Record').children[0].value
     entries = getList(getField(cmd, 'TableEntry_1'), 'TableEntry', 'TableEntry_1')
-    log("set " + table + ' ' + record + ' ' + ' '.join(map(getTableEntry, entries)))
+    log("set " + table + ' ' + record + ' ' + ' '.join(map(formatTableEntry, entries)))
+    if table == "Interface":
+        for e in entries:
+            ovsSetInterface(record, e)
+    elif table == "Open_vSwitch":
+        for e in entries:
+            ovsSetOVS(e)
+    elif table == "bridge" and record == "br-int":
+        for e in entries:
+            ovsSetBridge(e)
+
+def ovsSetInterface(iface, e):
+    (col, key, vals) = getTableEntry(e)
+    if col == "external-ids" and key == "iface-id":
+        cocoon("LPortBinding.put(LPortBinding{" + mkId(vals[0], 8) + ", " + mkId(iface, 8)  + "})")
+
+def ovsSetOVS(e):
+    (col, key, vals) = getTableEntry(e)
+    if col == "external-ids" and key == "ovn-encap-ip":
+        hypervisor = getHyhpervisor()
+        ip = mkAddress(vals[0])
+        vxportname = hypervisor + "-vxlan"
+        ovs_vsctl(["add-port", "br-int", vxportname, "--", "set", "interface", vxportname, "type=vxlan", "options:remote_ip=flow", "options:local_ip="+vals[0], "options:key=flow"])
+        pnum = ovs_vsctl(["get", "Interface", vxportname, "ofport"])
+        cocoon("TunnelPort.put(TunnelPort{" + ", ".join([mkId(hypervisor, 8), pnum, mkId(hypervisor, 8), ip]) + "})")
+
+def ovsSetBridge(e):
+    return
 
 ovsHandlers = { 'AddBr'     : ovsAddBr
               , 'AddPort'   : ovsAddPort
@@ -1136,4 +1201,4 @@ def test():
     testStrings(ovsTestLines, getOvsParser())
 
 if __name__ == "__main__":
-   main()
+    main()
