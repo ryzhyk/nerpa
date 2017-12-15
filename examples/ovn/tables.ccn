@@ -864,7 +864,7 @@ typedef tunport_id_t = bit<64>
 table TunnelPort( id         : tunport_id_t
                 , portnum    : bit<16>
                 , switch     : chassis_id_t
-                , externalip : ip_addr_t
+                , externalip : ip4_addr_t
                 , primary key (id)
                 , foreign key (switch) references Chassis(id)
                 , unique (switch)

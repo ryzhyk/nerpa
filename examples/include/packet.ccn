@@ -85,7 +85,7 @@ typedef conn_track_t = CT { new    : bool        // read-only
                           , commit : ct_commit_t // writing to this field commits the packet to connection tracking
                           }    
 
-typedef vxlan_t = VXLAN { tun_dst : ip_addr_t
+typedef vxlan_t = VXLAN { tun_dst : ip4_addr_t
                         , tun_id  : bit<64> }
 
 typedef vlan_id_t = bit<12>
