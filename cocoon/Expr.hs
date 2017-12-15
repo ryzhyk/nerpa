@@ -66,6 +66,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 --import Debug.Trace
 
+import Ops
 import Syntax
 import NS
 import Util
@@ -464,7 +465,7 @@ expr2Statement' r ctx e (EMatch _ (p,m) cs)            = do (p', e'') <- exprPre
 expr2Statement' r ctx e (EITE _ (p,i) t me)            = do (p', e'') <- exprPrecomputeVar ctx (extype r ctx $ E e) e'
                                                             return (p++p', e'')
     where e' = eITE i (prefMerge t) (fmap prefMerge me)
-expr2Statement' _ _   _ (ESet _ (pl,l) (pv,v))         = return (pl ++ pv, exprModifyResult (eSet l) v)
+expr2Statement' _ _   _ (ESet _ (pl,l) (pv,v))         = return (pl ++ pv, exprModifyResult (fset l) v)
 expr2Statement' _ _   _ (ESend _ (p,d))                = return (p, exprModifyResult eSend d)
 expr2Statement' _ _   _ (EBinOp _ op (p1,e1) (p2,e2))  = return (p1 ++ p2, eBinOp op e1 e2)
 expr2Statement' _ _   _ (EUnOp _ op (p,e))             = return (p, exprModifyResult (eUnOp op) e)
@@ -499,6 +500,10 @@ expr2Statement' r ctx e (EApplyLambda _ l as)          = do (p', e'') <- exprPre
 
 extype r ctx e = exprType r ctx e
 
+fset e1 e2@(E (EBinOp _ op _ _)) | bopReturnsBool op = eITE e2 (eSet e1 eTrue) (Just $ eSet e1 eFalse)
+fset e1 e2@(E (EUnOp _ Not _))                       = eITE e2 (eSet e1 eTrue) (Just $ eSet e1 eFalse)
+fset e1 e2                                           = eSet e1 e2
+
 prefMerge :: ([Expr], Expr) -> Expr
 prefMerge (p,e) = exprSequence $ p++[e]
 
@@ -521,7 +526,7 @@ exprModifyResult' f e                    = f $ E e
 exprPrecomputeVar :: ECtx -> Type -> Expr -> State Int ([Expr], Expr)
 exprPrecomputeVar ctx t e | operand ctx = do v <- allocVar
                                              let vdecl = eTyped (eVarDecl v) t
-                                             return ([vdecl, exprModifyResult (eSet $ eVar v) e], eVar v)
+                                             return ([vdecl, exprModifyResult (fset $ eVar v) e], eVar v)
                           | otherwise = return ([], e)
 
 operand :: ECtx -> Bool
