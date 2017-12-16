@@ -141,11 +141,11 @@ mkCmd (OF.DelFlow t p ms)        = vcat
 mkCmd (OF.AddGroup OF.Group{..}) = "group add" <+>
                                    commaCat [ "group_id=" <> pp groupId
                                             , "type=" <> pp groupType
-                                            , commaCat $ map (("bucket=" <>) . mkBucket) groupBuckets]
+                                            , commaCat $ map mkBucket groupBuckets]
 mkCmd (OF.DelGroup gid)          = "group delete" <+> "group_id=" <> pp gid
 mkCmd (OF.AddBucket gid b)       = "group insert_bucket" <+> 
                                    "group_id=" <> pp gid <> comma <>
-                                   "bucket=" <> mkBucket b
+                                   mkBucket b
 mkCmd (OF.DelBucket gid bid)     = "group remove_bucket" <+> 
                                    "group_id=" <> pp gid <> comma <>
                                    "bucket_id=" <> pp bid
