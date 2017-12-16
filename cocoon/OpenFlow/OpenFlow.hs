@@ -81,6 +81,7 @@ data Action = ActionOutput     {actPort :: Expr}
             | ActionGroup      {actGroup :: GroupId}
             | ActionDrop
             | ActionSet        {actLHS :: Expr, actRHS :: Expr}
+            | ActionBuiltin    {actBInName :: String, actBInArgs :: [Expr]}
             | ActionGoto       {actGotoTable :: HTable}
             | ActionController
 

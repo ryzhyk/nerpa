@@ -177,13 +177,20 @@ mkExprA (OF.EField f msl) = pp f' <> sl'
                Just (h,l) -> "[" <> pp l <> ".." <> pp h <> "]"
 
 mkAction :: OF.Action -> Doc
-mkAction (OF.ActionOutput p)          = "output:" <> mkExprA p
-mkAction (OF.ActionGroup  g)          = "group:" <> pp g
-mkAction OF.ActionDrop                = "drop"
-mkAction (OF.ActionSet l r@OF.EVal{}) = "load:" <> mkExprA r <> "->" <> mkExprA l
-mkAction (OF.ActionSet l r)           = "move:" <> mkExprA r <> "->" <> mkExprA l
-mkAction (OF.ActionGoto t)            = "goto_table:" <> pp t
-mkAction OF.ActionController          = "controller"
+mkAction (OF.ActionOutput p)                           = "output:" <> mkExprA p
+mkAction (OF.ActionGroup  g)                           = "group:" <> pp g
+mkAction OF.ActionDrop                                 = "drop"
+mkAction (OF.ActionSet l r@OF.EVal{})                  = "load:" <> mkExprA r <> "->" <> mkExprA l
+mkAction (OF.ActionSet l r)                            = "move:" <> mkExprA r <> "->" <> mkExprA l
+mkAction (OF.ActionGoto t)                             = "goto_table:" <> pp t
+mkAction OF.ActionController                           = "controller"
+mkAction (OF.ActionBuiltin "ct" [zone])                = "ct(zone=" <> mkExprA zone <> ")"
+mkAction (OF.ActionBuiltin "ct_commit" [zone])         = "ct(commit, zone=" <> mkExprA zone <> ")"
+mkAction (OF.ActionBuiltin "ct_commit" [zone,label])   = "ct(commit, zone=" <> mkExprA zone <> ", exec(set_field:" <> mkExprA label <> "->ct_label))"
+mkAction (OF.ActionBuiltin "ct_lb" [zone])             = "ct(zone=" <> mkExprA zone <> ", nat)"
+mkAction (OF.ActionBuiltin "ct_lb" [zone,ip])          = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkExprA ip <> "))"
+mkAction (OF.ActionBuiltin "ct_lb" [zone,ip,port])     = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkExprA ip <> ":" <> mkExprA port <> "))"
+mkAction (OF.ActionBuiltin f _)                        = error $ "OVS.mkAction: unknown action " ++ f
     --"controller(userdata=" <> (hcat $ punctuate "." $ map (pp . (\w -> (printf "%02x" w) :: String)) u) <> ")"
 
 mkBucket :: OF.Bucket -> Doc

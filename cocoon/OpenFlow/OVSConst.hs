@@ -66,7 +66,6 @@ ovsStructReify = StructReify ovsReifyWidth ovsReifyCons
 
 ovsReifyWidth = M.fromList
                 [ ("eth_pkt_t"       , 0)
-                , ("vlan_t"          , 16)
                 , ("eth_payload_t"   , 16)
                 , ("ip4_pkt_t"       , 0)
                 , ("ip6_pkt_t"       , 0)
@@ -187,6 +186,8 @@ matchMap = M.fromList
            , ("payload.ip6.payload.icmp6.payload.na.target"     ,"nd_target" )
            , ("payload.ip6.payload.icmp6.payload.ns.sll"        ,"nd_sll" )
            , ("payload.ip6.payload.icmp6.payload.na.tll"        ,"nd_tll" )
+           , ("ct_state"                                        ,"ct_state" )
+           , ("ct_label"                                        ,"ct_label" )
            ]
 
 
@@ -276,6 +277,8 @@ assnMap = M.fromList
           , ("payload.ip6.payload.icmp6.payload.na.target"     , ("NXM_NX_ND_TARGET"   , Nothing))
           , ("payload.ip6.payload.icmp6.payload.ns.sll"        , ("NXM_NX_ND_SLL"      , Nothing))
           , ("payload.ip6.payload.icmp6.payload.na.tll"        , ("NXM_NX_ND_TLL"      , Nothing))
+          , ("ct_state"                                        , ("NXM_NX_CT_STATE"    , Nothing))
+          , ("ct_label"                                        , ("NXM_NX_CT_LABEL"    , Nothing))
           ]
 
 matchAttributes :: M.Map String Attributes
@@ -344,6 +347,8 @@ matchAttributes = M.fromList
                   , ("nd_target"  , Attributes True  IP6)
                   , ("nd_sll"     , Attributes True  MAC)
                   , ("nd_tll"     , Attributes True  MAC)
+                  , ("ct_state"   , Attributes True  Hex)
+                  , ("ct_label"   , Attributes True  Hex)
                   ]
 
 
