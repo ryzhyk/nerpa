@@ -56,11 +56,12 @@ instance WithName Builtin where
 builtins :: [Builtin]
 builtins = [ bprint
            , bct
-           , bctField "ct_inv"   IR.TBool
-           , bctField "ct_rel"   IR.TBool
-           , bctField "ct_rpl"   IR.TBool
-           , bctField "ct_new"   IR.TBool
-           , bctField "ct_est"   IR.TBool
+           --, bctField "ct_inv"   IR.TBool
+           --, bctField "ct_rel"   IR.TBool
+           --, bctField "ct_rpl"   IR.TBool
+           --, bctField "ct_new"   IR.TBool
+           --, bctField "ct_est"   IR.TBool
+           , bctField "ct_state" (IR.TBit 32)
            , bctField "ct_label" (IR.TBit 128)
            , bctCommit
            , bctLB

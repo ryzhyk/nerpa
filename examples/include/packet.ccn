@@ -4,6 +4,12 @@ function ethUnicastAddr(addr: mac_addr_t): bool   = addr[40:40] == 0
 function ethMulticastAddr(addr: mac_addr_t): bool = addr[40:40] == 1
 function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
 
+function ct_new() : bool = ct_state()[0:0] == 1
+function ct_est() : bool = ct_state()[1:1] == 1
+function ct_rel() : bool = ct_state()[2:2] == 1
+function ct_rpl() : bool = ct_state()[3:3] == 1
+function ct_inv() : bool = ct_state()[4:4] == 1
+
 typedef ip4_addr_t = bit<32>
 typedef ip6_addr_t = bit<128>
 typedef ip_addr_t  = IPAddr4 {addr4 : ip4_addr_t}
