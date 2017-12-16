@@ -276,8 +276,8 @@ mkBB pname nd i val (I.BB as n) = map (mkAction ival) as ++ mkNext pname nd i iv
     where ival = I.val2Record ?r ?structs (C.exprConstructor $ C.enode val) val
 
 mkAction :: I.Record -> I.Action -> O.Action
-mkAction val (I.ASet e1 e2) = O.ActionSet (mkExpr val e1) (mkExpr val e2)
-mkAction _   I.ABuiltin{}   = error "not implemented: IR2OF.mkAction ABuiltin"
+mkAction val (I.ASet e1 e2)    = O.ActionSet (mkExpr val e1) (mkExpr val e2)
+mkAction val (I.ABuiltin f as) = O.ActionBuiltin f $ map (mkExpr val) as
 
 mkExpr :: I.Record -> I.Expr -> O.Expr
 mkExpr val e = {-trace ("mkExpr " ++ show val ++ " " ++ show e) $ -}
@@ -326,6 +326,8 @@ mkCond' c yes no =
          I.EBool True                  -> yes
          I.EBool False                 -> no
          e  | I.exprType e == I.TBit 1 -> mkCond' (I.EBinOp Eq e (I.EBit 1 1)) yes no
+         I.EPktField f I.TBool         -> mapMaybe (\(m,a) -> fmap (,a) (concatMatches [O.Match (O.Field f 1) Nothing 1] m)) yes ++ no
+         I.EVar v I.TBool              -> mapMaybe (\(m,a) -> fmap (,a) (concatMatches [O.Match (O.Field v 1) Nothing 1] m)) yes ++ no
          _                             -> error $ "IR2OF.mkCond': expression is not supported: " ++ show c
 
 -- TODO: use BDDs to encode arbitrary pipelines
