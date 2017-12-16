@@ -187,12 +187,13 @@ compileExprAt vars ctx entrynd _ (E e@(ESend _ (E el@(ELocation _ _ x _)))) = do
     updateNode entrynd (I.Par [I.BB [] $ I.Send port]) []
     return vars
 
-compileExprAt vars ctx entrynd exitnd (E e@(EFork _ v t c b)) = do
+compileExprAt vars ctx entrynd exitnd e@(E EFork{}) = compileQuery vars ctx entrynd exitnd e
     -- Transform the fork statement to drop packets that do not match
     -- the fork condition right after fork.  This is necessary, since
     -- our OpenFlow backend will fork a packet on every row of the table.
     -- We still keep the condition in the Fork node, so we can use it
     -- in optimizations.
+    {-
     let b' = eSeq (eITE (eNot c) eDrop Nothing) b
     let rel = getRelation ?r t
         cols = relCols rel
@@ -203,7 +204,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(EFork _ v t c b)) = do
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) exitnd b'
     updateNode entrynd (I.Fork t cdeps' cpl $ I.BB asns $ I.Goto entryndb) [entryndb]
-    return vars
+    return vars -}
 
 compileExprAt vars ctx entrynd exitnd e@(E EWith{}) = compileQuery vars ctx entrynd exitnd e
 compileExprAt vars ctx entrynd exitnd e@(E EAny{})  = compileQuery vars ctx entrynd exitnd e
@@ -263,7 +264,7 @@ compileQuery vars ctx entrynd exitnd (E e) = do
     let v  = exprFrkVar e
         t  = exprTable e
         c  = exprCond e
-        b  = exprWithBody e
+        b  = exprBody e
         md = exprDef e
     let rel = getRelation ?r t
         cols = relCols rel
@@ -273,15 +274,17 @@ compileQuery vars ctx entrynd exitnd (E e) = do
     let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) rel entrynd v c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
-    let sel = case e of
-                   EWith{} -> I.First
-                   EAny{}  -> I.Rand
-                   _       -> error $ "Compile2IR.compileQuery e=" ++ show e
-    case md of
-         Just d -> do
-             (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
-             updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd) sel) [entryndb, entryndd]
-         Nothing -> updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) sel) [entryndb]
+    case e of
+         EFork{} -> updateNode entrynd (I.Fork t cdeps' cpl (I.BB asns $ I.Goto entryndb)) [entryndb]
+         _   -> let sel = case e of
+                               EWith{} -> I.First
+                               EAny{}  -> I.Rand
+                               _       -> error $ "Compile2IR.compileQuery e=" ++ show e in
+                case md of
+                     Just d -> do
+                         (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
+                         updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd) sel) [entryndb, entryndd]
+                     Nothing -> updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) sel) [entryndb]
     return vars
 
 -- Compile boolean expression and determine its dependencies without changing compilation state
