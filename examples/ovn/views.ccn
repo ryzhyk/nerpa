@@ -194,16 +194,19 @@ LPortUnknownMACChassis(lport, lswitch, sender, true)  :-
     Chassis(sender, f, _, _), f==false,
     LogicalSwitchPort(lport, lswitch, LPortRouter{r}, _, en, _, _, u, _), en, u
 
+typedef destination_t = DSTChassis {chassis : chassis_id_t}
+                      | DSTLocal
+
 // Switch has presence at chassis (through VM or L2Gateway port)
 view LSwitchAtChassis( sender  : chassis_id_t
                      , lswitch : lswitch_id_t
-                     , chassis : chassis_id_t)
+                     , chassis : destination_t)
 
-LSwitchAtChassis(sender, lswitch, chassis) :- Chassis(sender, f, _, _), f==false, 
-                                              LPortAtChassis(_, lswitch, chassis, f), ((not f) or (chassis == sender))
+LSwitchAtChassis(sender, lswitch, DSTLocal) :- Chassis(sender, f, _, _), f==false, 
+                                               LPortAtChassis(_, lswitch, sender, _)
 
-typedef destination_t = DSTChassis {chassis : chassis_id_t}
-                      | DSTLocal
+LSwitchAtChassis(sender, lswitch, DSTChassis{chassis}) :- Chassis(sender, f, _, _), f==false, 
+                                                          LPortAtChassis(_, lswitch, chassis, fl), ((not fl) and (chassis != sender))
 
 // Switch has known MAC address at chassis
 view MACChassis ( lswitch : lswitch_id_t  
@@ -216,8 +219,12 @@ MACChassis(lswitch, mac, DSTLocal)            :- LPortMACChassis(lswitch, _, mac
 // Switch has unknown MAC address at chassis
 view UnknownMACChassis ( sender  : chassis_id_t
                        , lswitch : lswitch_id_t  
-                       , chassis : chassis_id_t)
+                       , chassis : destination_t)
 
-UnknownMACChassis(sender, lswitch, chassis) :-
+UnknownMACChassis(sender, lswitch, DSTLocal) :-
     Chassis(sender, f, _, _), f==false, 
-    LPortUnknownMACChassis(_, lswitch, chassis, f), (f => (chassis == sender))
+    LPortUnknownMACChassis(_, lswitch, sender, _)
+
+UnknownMACChassis(sender, lswitch, DSTChassis{chassis}) :-
+    Chassis(sender, f, _, _), f==false, 
+    LPortUnknownMACChassis(_, lswitch, chassis, fl), ((not fl) and (chassis != sender))
