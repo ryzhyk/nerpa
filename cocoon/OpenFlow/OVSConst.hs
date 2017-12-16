@@ -88,7 +88,7 @@ ovsReifyCons = M.fromList
                , ("ARPRequest"  , 0x0001)
                , ("ARPReply"    , 0x0002)
                , ("IPTCP"       , 0x06)
-               , ("IPUDP"       , 0x17)
+               , ("IPUDP"       , 0x11)
                , ("IPICMP4"     , 0x01)
                , ("IPICMP6"     , 0x3a)
                , ("ICMP6NS"     , 135)
