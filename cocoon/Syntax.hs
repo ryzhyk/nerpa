@@ -529,10 +529,10 @@ data ExprNode e = EVar          {exprPos :: Pos, exprVar :: String}
                 | ESend         {exprPos :: Pos, exprDst  :: e}
                 | EBinOp        {exprPos :: Pos, exprBOp :: BOp, exprLeft :: e, exprRight :: e}
                 | EUnOp         {exprPos :: Pos, exprUOp :: UOp, exprOp :: e}
-                | EFor          {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprFrkBody :: e}
-                | EFork         {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprFrkBody :: e}
-                | EWith         {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
-                | EAny          {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
+                | EFor          {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprBody :: e}
+                | EFork         {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprBody :: e}
+                | EWith         {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprBody :: e, exprDef :: Maybe e}
+                | EAny          {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprBody :: e, exprDef :: Maybe e}
                 | EPHolder      {exprPos :: Pos}
                 | EAnon         {exprPos :: Pos}
                 | ETyped        {exprPos :: Pos, exprExpr :: e, exprTSpec :: Type}
