@@ -472,8 +472,10 @@ needsTag t = tagWidth t > 0
 
 tagWidth :: (?s::StructReify, ?r::Refine) => TypeDef -> Int
 tagWidth t = case M.lookup (tdefName t) (reifyWidth ?s) of
-                  Just w  -> w 
-                  Nothing -> bitWidth $ length (typeCons $ fromJust $ tdefType t) - 1
+                  Just w               -> w
+                  Nothing | ncons == 1 -> 0
+                          | otherwise  -> bitWidth $ ncons - 1
+    where ncons = length (typeCons $ fromJust $ tdefType t)
 
 tagType :: (?s::StructReify, ?r::Refine) => TypeDef -> Type
 tagType t = TBit nopos $ tagWidth t
