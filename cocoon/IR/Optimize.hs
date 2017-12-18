@@ -26,7 +26,6 @@ import Data.List
 import Data.Maybe
 --import Debug.Trace
 --import System.IO.Unsafe
---import Data.Text.Lazy (unpack)
 
 import Util
 import IR.IR
@@ -34,7 +33,7 @@ import IR.IR
 optimize :: Int -> Pipeline -> Pipeline
 optimize p pl | modified  = optimize (p+1) pl'
               | otherwise = pl'
-    where (pl', modified) = --trace(unsafePerformIO $ do {writeFile ("pass" ++ show p ++ ".dot") $ unpack $ cfgToDot $ plCFG pl; return ""}) $
+    where (pl', modified) = --trace(unsafePerformIO $ do {writeFile ("pass" ++ show p ++ ".dot") $ cfgToDot $ plCFG pl; return ""}) $
                             --trace ("******** optimizer pass " ++ show p ++ " *********") $
                             runState (pass pl) False
 
@@ -237,10 +236,10 @@ optMergeCond pl@Pipeline{..} = do
                     case G.lab cfg_ n of
                          -- conditional node
                          Just (Cond cs) -> case G.match n cfg_ of
-                                                -- unique predecessor that is also a conditional node...
+                                                -- unique predecessor that is also a conditional node with exactly one branch pointing towards n ...
                                                 (Just ([(_, n')], _, _, _), _) -> 
                                                     case G.lab cfg_ n' of
-                                                         Just (Cond cs') -> do
+                                                         Just (Cond cs') | length (filter ((==Goto n) .bbNext . snd) cs') == 1 -> do
                                                              -- and does not modify variables n depends on
                                                              let vs = concatMap (exprAtoms . fst) cs
                                                                  vs' = concatMap (bbLHSAtoms . snd) 
@@ -261,7 +260,7 @@ bbLHSAtoms b = nub $ concatMap (\case
                                  ABuiltin{} -> []) $ bbActions b
 
 mergeCond :: CFG -> NodeId -> NodeId -> CFG
-mergeCond cfg nto n = (pre', nto, Cond csto', suc' ++ suc) G.& cfg2 
+mergeCond cfg nto n = {-trace ("merging " ++ show n ++ " into " ++ show nto) $-} (pre', nto, Cond csto', nub $ suc' ++ suc) G.& cfg2 
     where -- remove the node being merged
           (Just (_, _, Cond cs, suc), cfg1) = G.match n cfg
           (Just (pre', _, Cond csto, suc'), cfg2) = G.match nto cfg1
