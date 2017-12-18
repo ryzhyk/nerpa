@@ -78,9 +78,10 @@ ctCompileExprAt structs r vars ctx entrynd exitnd e@(EBuiltin _ f as) = do
                                            ?s = structs
                                        in IR.mkExpr vars (CtxBuiltin e ctx i) a) as
         bb = IR.BB [IR.ABuiltin f as'] $ maybe IR.Drop IR.Goto exitnd
+        bb' = IR.BB [] $ maybe IR.Drop IR.Goto exitnd
         condip = IR.EBinOp Eq (IR.EPktField "ethtype" (IR.TBit 16)) (IR.EBit 16 0x800)
         condip6 = IR.EBinOp Eq (IR.EPktField "ethtype" (IR.TBit 16)) (IR.EBit 16 0x86dd)
-    IR.updateNode entrynd (IR.Cond [(condip, bb), (condip6, bb), (IR.EBool True, bb)]) $ maybeToList exitnd
+    IR.updateNode entrynd (IR.Cond [(condip, bb), (condip6, bb), (IR.EBool True, bb')]) $ maybeToList exitnd
     return vars
 ctCompileExprAt _ _ _ _ _ _ e = error $ "Builtins.ctCompileExprAt " ++ show e
 
