@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
-{-# LANGUAGE ImplicitParams, TupleSections, RecordWildCards, FlexibleContexts, ScopedTypeVariables #-}
+{-# LANGUAGE ImplicitParams, TupleSections, RecordWildCards, FlexibleContexts, ScopedTypeVariables, LambdaCase #-}
 
 module OpenFlow.IR2OF( IRSwitch
                      , IRSwitches
@@ -305,11 +305,55 @@ mkLookupFlow pname nd val lpl b = {-trace ("mkLookupFlow " ++ show val ++ " " ++
     as = case b of 
               Left bb    -> mkBB pname nd 0 val bb
               Right acts -> acts
-    
+
+-- compile Cond node    
+-- TODO: use BDDs to find a near-optimal representation
 mkCond :: [(I.Expr, [O.Action])] -> [([O.Match], [O.Action])]
 mkCond []          = [([], [O.ActionDrop])]
-mkCond ((c, a):cs) = mkCond' c [([], a)] $ mkCond cs
+mkCond ((c, a):cs) = let cs' = mkCond cs
+                         c' = mkCond' c in
+                     concatMap (\case
+                                 (x, True)  -> [(x,a)]
+                                 (x, False) -> mapMaybe (\(y, a') -> fmap ((,a')) $ concatMatches x y) cs') c'
 
+mkCond' :: I.Expr -> [([O.Match], Bool)]
+mkCond' c = 
+    case I.exprEval c of
+         I.EBinOp Eq e1 e2 | I.exprIsBool e1 
+                                       -> let e1s = mkCond' e1
+                                              e2s = mkCond' e2 in
+                                          mergeTail
+                                          $ concatMap (\(e2', b2) -> mapMaybe (\(e1', b1) -> fmap ((, b1 == b2)) $ concatMatches e1' e2') e1s) e2s 
+                           | I.exprIsBit e1
+                                       -> let cs' = mkMatch e1 e2
+                                          in map (, True) cs' ++ [([], False)]
+         I.EBinOp Neq e1 e2            -> mkCond' (I.EUnOp Not (I.EBinOp Eq e1 e2))
+         I.EBinOp Impl e1 e2           -> mkCond' (I.EBinOp Or (I.EUnOp Not e1) e2)
+         I.EUnOp Not e                 -> map (mapSnd not) $ mkCond' e
+         I.EBinOp And e1 e2            -> let e1s = mkCond' e1
+                                              e2s = mkCond' e2
+                                          in mergeTail $
+                                             concatMap (\case
+                                                         (e2', True)  -> mapMaybe (\(e1', b) -> fmap ((,b)) $ concatMatches e1' e2') e1s
+                                                         (e2', False) -> [(e2', False)] ) e2s 
+         I.EBinOp Or e1 e2             -> let e1s = mkCond' e1
+                                              e2s = mkCond' e2
+                                          in mergeTail $
+                                             concatMap (\case
+                                                         (e2', False)  -> mapMaybe (\(e1', b) -> fmap ((,b)) $ concatMatches e1' e2') e1s
+                                                         (e2', True) -> [(e2', True)] ) e2s 
+         I.EBool True                  -> [([], True)]
+         I.EBool False                 -> [([], True)]
+         e  | I.exprType e == I.TBit 1 -> mkCond' (I.EBinOp Eq e (I.EBit 1 1))
+         --I.EPktField f I.TBool         -> mapMaybe (\(m,a) -> fmap (,a) (concatMatches [O.Match (O.Field f 1) Nothing 1] m)) yes ++ no
+         --I.EVar v I.TBool              -> mapMaybe (\(m,a) -> fmap (,a) (concatMatches [O.Match (O.Field v 1) Nothing 1] m)) yes ++ no
+         _                             -> error $ "IR2OF.mkCond': expression is not supported: " ++ show c
+    where mergeTail [] = []
+          mergeTail xs = let ((x,b):xs') = reverse xs
+                             xs'' = dropWhile ((==b) . snd) xs'
+                         in reverse $ (x,b) : xs''
+
+{-
 mkCond' :: I.Expr -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])]
 mkCond' c yes no =
     case I.exprEval c of
@@ -329,6 +373,7 @@ mkCond' c yes no =
          I.EPktField f I.TBool         -> mapMaybe (\(m,a) -> fmap (,a) (concatMatches [O.Match (O.Field f 1) Nothing 1] m)) yes ++ no
          I.EVar v I.TBool              -> mapMaybe (\(m,a) -> fmap (,a) (concatMatches [O.Match (O.Field v 1) Nothing 1] m)) yes ++ no
          _                             -> error $ "IR2OF.mkCond': expression is not supported: " ++ show c
+-}
 
 -- TODO: use BDDs to encode arbitrary pipelines
 mkPLMatch :: I.Pipeline -> [[O.Match]]
