@@ -199,7 +199,18 @@ procedure ingressConnTrack(lport : LogicalSwitchPort): () = {
     } default { () };
 
     // sends the packet to connection tracker
-    ct(lport.ct_zone)
+    if needCT {
+        ctrack(lport.ct_zone)
+    }
+}
+
+// OVS requires dl_type match for action=ct flows
+procedure ctrack(zone : ct_zone_t) : () = {
+    match (pkt.payload) {
+        EthIP4{_} -> ct(zone),
+        EthIP6{_} -> ct(zone),
+        _         -> ()
+    }
 }
 
 /*
@@ -606,7 +617,9 @@ procedure egressConnTrack(lport : LogicalSwitchPort): () = {
     } default { () };
 
     // sends the packet to connection tracker
-    ct(lport.ct_zone)
+    if (needCT) {
+        ctrack(lport.ct_zone)
+    }
 }
 
 procedure egressLB(lport : LogicalSwitchPort) : bool = {
