@@ -130,7 +130,7 @@ mkCmd (OF.AddFlow t OF.Flow{..}) = vcat
                                                 commaCat [ "table=" <> pp t
                                                          , "priority=" <> pp flowPriority
                                                          , commaCat m
-                                                         , "actions=" <> (commaCat $ map mkAction flowActions)])
+                                                         , "actions=" <> (commaCat $ map (mkAction False) flowActions)])
                                    $ allComb $ map mkMatch flowMatch
 mkCmd (OF.DelFlow t p ms)        = vcat 
                                    $ map (\m -> "flow delete_strict" <+>
@@ -141,14 +141,15 @@ mkCmd (OF.DelFlow t p ms)        = vcat
 mkCmd (OF.AddGroup OF.Group{..}) = "group add" <+>
                                    commaCat [ "group_id=" <> pp groupId
                                             , "type=" <> pp groupType
-                                            , commaCat $ map mkBucket groupBuckets]
+                                            , commaCat $ map (("bucket=" <>) . mkBucket) groupBuckets]
 mkCmd (OF.DelGroup gid)          = "group delete" <+> "group_id=" <> pp gid
 mkCmd (OF.AddBucket gid b)       = "group insert_bucket" <+> 
                                    "group_id=" <> pp gid <> comma <>
-                                   mkBucket b
+                                   "command_bucket_id=first" <> comma <>
+                                   "bucket=" <> mkBucket b
 mkCmd (OF.DelBucket gid bid)     = "group remove_bucket" <+> 
                                    "group_id=" <> pp gid <> comma <>
-                                   "bucket_id=" <> pp bid
+                                   "command_bucket_id=" <> pp bid
 
 mkMatch :: OF.Match -> [Doc]
 mkMatch OF.Match{..} = map (\m -> pp n <> "=" <> mkVal attrFormat matchVal <> m) masks
@@ -176,26 +177,27 @@ mkExprA (OF.EField f msl) = pp f' <> sl'
                Nothing    -> "[]"
                Just (h,l) -> "[" <> pp l <> ".." <> pp h <> "]"
 
-mkAction :: OF.Action -> Doc
-mkAction (OF.ActionOutput p)                           = "output:" <> mkExprA p
-mkAction (OF.ActionGroup  g)                           = "group:" <> pp g
-mkAction OF.ActionDrop                                 = "drop"
-mkAction (OF.ActionSet l r@OF.EVal{})                  = "load:" <> mkExprA r <> "->" <> mkExprA l
-mkAction (OF.ActionSet l r)                            = "move:" <> mkExprA r <> "->" <> mkExprA l
-mkAction (OF.ActionGoto t)                             = "goto_table:" <> pp t
-mkAction OF.ActionController                           = "controller"
-mkAction (OF.ActionBuiltin "ct" [zone])                = "ct(zone=" <> mkExprA zone <> ")"
-mkAction (OF.ActionBuiltin "ct_commit" [zone])         = "ct(commit, zone=" <> mkExprA zone <> ")"
-mkAction (OF.ActionBuiltin "ct_commit" [zone,label])   = "ct(commit, zone=" <> mkExprA zone <> ", exec(set_field:" <> mkExprA label <> "->ct_label))"
-mkAction (OF.ActionBuiltin "ct_lb" [zone])             = "ct(zone=" <> mkExprA zone <> ", nat)"
-mkAction (OF.ActionBuiltin "ct_lb" [zone,ip])          = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkExprA ip <> "))"
-mkAction (OF.ActionBuiltin "ct_lb" [zone,ip,port])     = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkExprA ip <> ":" <> mkExprA port <> "))"
-mkAction (OF.ActionBuiltin f _)                        = error $ "OVS.mkAction: unknown action " ++ f
+mkAction :: Bool -> OF.Action -> Doc
+mkAction _ (OF.ActionOutput p)                           = "output:" <> mkExprA p
+mkAction _ (OF.ActionGroup  g)                           = "group:" <> pp g
+mkAction _ OF.ActionDrop                                 = "drop"
+mkAction _ (OF.ActionSet l r@OF.EVal{})                  = "load:" <> mkExprA r <> "->" <> mkExprA l
+mkAction _ (OF.ActionSet l r)                            = "move:" <> mkExprA r <> "->" <> mkExprA l
+mkAction False (OF.ActionGoto t)                             = "goto_table:" <> pp t
+mkAction True (OF.ActionGoto t)                             = "resubmit" <> (parens $ pp t)
+mkAction _ OF.ActionController                           = "controller"
+mkAction _ (OF.ActionBuiltin "ct" [zone])                = "ct(zone=" <> mkExprA zone <> ")"
+mkAction _ (OF.ActionBuiltin "ct_commit" [zone])         = "ct(commit, zone=" <> mkExprA zone <> ")"
+mkAction _ (OF.ActionBuiltin "ct_commit" [zone,label])   = "ct(commit, zone=" <> mkExprA zone <> ", exec(set_field:" <> mkExprA label <> "->ct_label))"
+mkAction _ (OF.ActionBuiltin "ct_lb" [zone])             = "ct(zone=" <> mkExprA zone <> ", nat)"
+mkAction _ (OF.ActionBuiltin "ct_lb" [zone,ip])          = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkExprA ip <> "))"
+mkAction _ (OF.ActionBuiltin "ct_lb" [zone,ip,port])     = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkExprA ip <> ":" <> mkExprA port <> "))"
+mkAction _ (OF.ActionBuiltin f _)                        = error $ "OVS.mkAction: unknown action " ++ f
     --"controller(userdata=" <> (hcat $ punctuate "." $ map (pp . (\w -> (printf "%02x" w) :: String)) u) <> ")"
 
 mkBucket :: OF.Bucket -> Doc
-mkBucket (OF.Bucket mid as) = commaCat [ maybe empty (("bucket=" <>) . pp) mid
-                                       , "actions=" <> (commaCat $ map mkAction as)]
+mkBucket (OF.Bucket mid as) = commaCat [ maybe empty (("bucket_id=" <>) . pp) mid
+                                       , "actions=" <> (commaCat $ map (mkAction True) as)]
 
 pprintf x y = text $ printf x y
 
