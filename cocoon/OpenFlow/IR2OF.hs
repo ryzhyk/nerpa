@@ -144,7 +144,7 @@ updatePort pname pl i db = delcmd ++ addcmd
     addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [O.ActionGoto $ I.plEntryNode pl]) $ match f) add
 
 mkNode :: (?r::C.Refine, ?structs::B.StructReify) => String -> (I.NodeId, I.Node) -> [O.Command]
-mkNode pname (nd, node) = 
+mkNode pname (nd, node) = trace ("mkNode " ++ show nd) $
     case node of
          I.Par bs                    -> [ O.AddGroup $ O.Group nd O.GroupAll $ mapIdx (\b i -> O.Bucket Nothing $ mkStaticBB pname nd i b) bs 
                                         , O.AddFlow nd $ O.Flow 0 [] [O.ActionGroup nd] ]
@@ -329,6 +329,14 @@ mkCond' c =
                                           in map (, True) cs' ++ [([], False)]
          I.EBinOp Neq e1 e2            -> mkCond' (I.EUnOp Not (I.EBinOp Eq e1 e2))
          I.EBinOp Impl e1 e2           -> mkCond' (I.EBinOp Or (I.EUnOp Not e1) e2)
+         I.EUnOp Not (I.EBinOp Eq e1 e2) | I.exprType e1 == I.TBit 1 && e2 == I.EBit 1 0 
+                                       -> mkCond' $ I.EBinOp Eq e1 (I.EBit 1 1) 
+         I.EUnOp Not (I.EBinOp Eq e1 e2) | I.exprType e1 == I.TBit 1 && e2 == I.EBit 1 1 
+                                       -> mkCond' $ I.EBinOp Eq e1 (I.EBit 1 0) 
+         I.EUnOp Not (I.EBinOp Eq e1 e2) | I.exprType e1 == I.TBit 1 && e1 == I.EBit 1 0 
+                                       -> mkCond' $ I.EBinOp Eq (I.EBit 1 1) e2
+         I.EUnOp Not (I.EBinOp Eq e1 e2) | I.exprType e1 == I.TBit 1 && e1 == I.EBit 1 1 
+                                       -> mkCond' $ I.EBinOp Eq (I.EBit 1 0) e2
          I.EUnOp Not e                 -> map (mapSnd not) $ mkCond' e
          I.EBinOp And e1 e2            -> let e1s = mkCond' e1
                                               e2s = mkCond' e2
