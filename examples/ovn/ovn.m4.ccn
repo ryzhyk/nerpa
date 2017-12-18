@@ -200,16 +200,7 @@ procedure ingressConnTrack(lport : LogicalSwitchPort): () = {
 
     // sends the packet to connection tracker
     if needCT {
-        ctrack(lport.ct_zone)
-    }
-}
-
-// OVS requires dl_type match for action=ct flows
-procedure ctrack(zone : ct_zone_t) : () = {
-    match (pkt.payload) {
-        EthIP4{_} -> ct(zone),
-        EthIP6{_} -> ct(zone),
-        _         -> ()
+        ct(lport.ct_zone)
     }
 }
 
@@ -294,7 +285,7 @@ procedure ingressLB(lport : LogicalSwitchPort, commit : bool) : () = {
         ct_lb(lport.ct_zone, IPAddr4{lb.ip.addr}, lb.ip.prt)
     } default {
         if (ct_est() and (not ct_rel()) and (not ct_new()) and (not ct_inv())) {
-            ct_lb(lport.ct_zone)
+            if (pkt.ethtype == 16'h800) { ct_lb(lport.ct_zone) }
         } else if commit {
             ct_commit(lport.ct_zone)
         } 
@@ -577,7 +568,7 @@ procedure lportEgress(lport: LogicalSwitchPort, chassis : chassis_id_t): sink = 
     (var allowed, var aclcommit) = acl(lport, ACLTo);
     if (not allowed) {
         drop
-    } else if (lbcommit) {
+    } else if (lbcommit and (pkt.ethtype == 16'h800)) {
         ct_lb(lport.ct_zone)
     } else if (aclcommit) {
         ct_commit(lport.ct_zone)
@@ -618,7 +609,7 @@ procedure egressConnTrack(lport : LogicalSwitchPort): () = {
 
     // sends the packet to connection tracker
     if (needCT) {
-        ctrack(lport.ct_zone)
+        ct(lport.ct_zone)
     }
 }
 
