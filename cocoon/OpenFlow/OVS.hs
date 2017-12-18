@@ -190,9 +190,11 @@ mkAction _ (OF.ActionBuiltin "ct" [zone])                = "ct(zone=" <> mkExprA
 mkAction _ (OF.ActionBuiltin "ct_commit" [zone])         = "ct(commit, zone=" <> mkExprA zone <> ")"
 mkAction _ (OF.ActionBuiltin "ct_commit" [zone,label])   = "ct(commit, zone=" <> mkExprA zone <> ", exec(set_field:" <> mkExprA label <> "->ct_label))"
 mkAction _ (OF.ActionBuiltin "ct_lb" [zone])             = "ct(zone=" <> mkExprA zone <> ", nat)"
-mkAction _ (OF.ActionBuiltin "ct_lb" [zone,ip])          = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkExprA ip <> "))"
-mkAction _ (OF.ActionBuiltin "ct_lb" [zone,ip,port])     = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkExprA ip <> ":" <> mkExprA port <> "))"
-mkAction _ (OF.ActionBuiltin f _)                        = error $ "OVS.mkAction: unknown action " ++ f
+mkAction _ (OF.ActionBuiltin "ct_lb" [zone,OF.EVal (OF.Value _ 0),OF.EVal (OF.Value _ ip4),_])     = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkVal IP4 ip4 <> "))"
+mkAction _ (OF.ActionBuiltin "ct_lb" [zone,OF.EVal (OF.Value _ 1),_,OF.EVal (OF.Value _ ip6)])     = "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkVal IP6 ip6 <> "))"
+mkAction _ (OF.ActionBuiltin "ct_lb" [zone,OF.EVal (OF.Value _ 0),OF.EVal (OF.Value _ ip4),_,port])= "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkVal IP4 ip4 <> ":" <> mkExprA port <> "))"
+mkAction _ (OF.ActionBuiltin "ct_lb" [zone,OF.EVal (OF.Value _ 1),_,OF.EVal (OF.Value _ ip6),port])= "ct(commit, zone=" <> mkExprA zone <> ", nat(dst=" <> mkVal IP6 ip6 <> ":" <> mkExprA port <> "))"
+mkAction _ (OF.ActionBuiltin f as)                       = error $ "OVS.mkAction: unknown action " ++ f ++ " " ++ show as
     --"controller(userdata=" <> (hcat $ punctuate "." $ map (pp . (\w -> (printf "%02x" w) :: String)) u) <> ")"
 
 mkBucket :: OF.Bucket -> Doc
