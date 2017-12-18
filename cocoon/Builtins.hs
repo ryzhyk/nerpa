@@ -72,15 +72,27 @@ builtins = [ bprint
 notImplemented bin meth = error $ "Builtins: method " ++ meth ++ " is not supported for builtin function " ++ bin
 skipValidate2 _ _ _ = return ()
 
+ctCompileExprAt :: StructReify -> Refine -> (M.Map String String) -> ECtx -> IR.NodeId -> Maybe IR.NodeId -> ENode -> State IR.Pipeline (M.Map String String)
+ctCompileExprAt structs r vars ctx entrynd exitnd e@(EBuiltin _ f as) = do
+    let as' = concat $ mapIdx (\a i -> let ?r = r
+                                           ?s = structs
+                                       in IR.mkExpr vars (CtxBuiltin e ctx i) a) as
+        bb = IR.BB [IR.ABuiltin f as'] $ maybe IR.Drop IR.Goto exitnd
+        condip = IR.EBinOp Eq (IR.EPktField "ethtype" (IR.TBit 16)) (IR.EBit 16 0x800)
+        condip6 = IR.EBinOp Eq (IR.EPktField "ethtype" (IR.TBit 16)) (IR.EBit 16 0x86dd)
+    IR.updateNode entrynd (IR.Cond [(condip, bb), (condip6, bb), (IR.EBool True, bb)]) $ maybeToList exitnd
+    return vars
+ctCompileExprAt _ _ _ _ _ _ e = error $ "Builtins.ctCompileExprAt " ++ show e
+
 compileExprAt :: StructReify -> Refine -> (M.Map String String) -> ECtx -> IR.NodeId -> Maybe IR.NodeId -> ENode -> State IR.Pipeline (M.Map String String)
 compileExprAt structs r vars ctx entrynd exitnd e@(EBuiltin _ f as) = do
     let as' = concat $ mapIdx (\a i -> let ?r = r
                                            ?s = structs
                                        in IR.mkExpr vars (CtxBuiltin e ctx i) a) as
-    IR.updateNode entrynd (IR.Par [IR.BB [IR.ABuiltin f as'] $ maybe IR.Drop IR.Goto exitnd]) $ maybeToList exitnd
+        bb = IR.BB [IR.ABuiltin f as'] $ maybe IR.Drop IR.Goto exitnd
+    IR.updateNode entrynd (IR.Par [bb]) $ maybeToList exitnd
     return vars
 compileExprAt _ _ _ _ _ _ e = error $ "Builtins.compileExprAt " ++ show e
-
 
 
 {- print(expr) -}
@@ -111,7 +123,7 @@ bct = Builtin "ct"
               ctValidate1
               ctValidate2
               ctType
-              compileExprAt
+              ctCompileExprAt
               (\_ _ _ _ _ -> notImplemented "ct" "bfuncMkExpr")
               ctEval
 
@@ -164,7 +176,7 @@ bctCommit = Builtin "ct_commit"
                     ctCommitValidate1
                     ctCommitValidate2
                     ctCommitType
-                    compileExprAt
+                    ctCompileExprAt
                     (\_ _ _ _ _ -> notImplemented "ct_commit" "bfuncMkExpr")
                     (\_ -> notImplemented "ct_commit" "bfuncEval")
 
