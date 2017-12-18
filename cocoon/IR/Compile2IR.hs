@@ -113,10 +113,10 @@ compilePort' SwitchPort{..} = do
     (vars, asns) <- declAsnVar M.empty key (relRecordType rel) entrynd $ relCols rel
     pl <- get
     let c = eBinOp Eq (eField (eVar key) "portnum") (eField ePacket "portnum")
-    let (cdeps, cpl) = exprDeps vars (CtxFunc f CtxRefine) rel entrynd key c pl
+    let (cdeps, ccols, cpl) = exprDeps vars (CtxFunc f CtxRefine) rel entrynd key c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxFunc f CtxRefine) Nothing e
-    updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) I.First) [entryndb]
+    updateNode entrynd (I.Lookup (name rel) cdeps' (ccols, cpl) (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) I.First) [entryndb]
 
 compileExpr :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
 compileExpr vars ctx exitnd e = do
@@ -258,7 +258,7 @@ compileExprAt vars _   entrynd exitnd (E EPHolder{}) = ignore vars entrynd exitn
 compileExprAt vars _   entrynd exitnd (E EAnon{})    = ignore vars entrynd exitnd
 compileExprAt _    _   _       _      e              = error $ "Compile2IR: compileExprAt " ++ show e
 
--- Helper for compiling EWith and EAny
+-- Helper for compiling EWith, EAny, EFork
 compileQuery :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> I.NodeId -> Maybe I.NodeId -> Expr -> CompileState VMap
 compileQuery vars ctx entrynd exitnd (E e) = do
     let v  = exprFrkVar e
@@ -271,11 +271,11 @@ compileQuery vars ctx entrynd exitnd (E e) = do
     plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     pl <- get
-    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) rel entrynd v c pl
+    let (cdeps, ccols, cpl) = exprDeps vars' (CtxWithCond e ctx) rel entrynd v c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
     case e of
-         EFork{} -> updateNode entrynd (I.Fork t cdeps' cpl (I.BB asns $ I.Goto entryndb)) [entryndb]
+         EFork{} -> updateNode entrynd (I.Fork t cdeps' (ccols, cpl) (I.BB asns $ I.Goto entryndb)) [entryndb]
          _   -> let sel = case e of
                                EWith{} -> I.First
                                EAny{}  -> I.Rand
@@ -283,13 +283,13 @@ compileQuery vars ctx entrynd exitnd (E e) = do
                 case md of
                      Just d -> do
                          (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
-                         updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd) sel) [entryndb, entryndd]
-                     Nothing -> updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) sel) [entryndb]
+                         updateNode entrynd (I.Lookup t cdeps' (ccols, cpl) (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd) sel) [entryndb, entryndd]
+                     Nothing -> updateNode entrynd (I.Lookup t cdeps' (ccols, cpl) (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) sel) [entryndb]
     return vars
 
 -- Compile boolean expression and determine its dependencies without changing compilation state
-exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> I.NodeId -> String -> Expr -> I.Pipeline -> ([I.VarName], I.FPipeline)
-exprDeps vars ctx rel nd relvar e pl = (deps, fpl)
+exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> I.NodeId -> String -> Expr -> I.Pipeline -> ([I.VarName], [I.ColName], I.FPipeline)
+exprDeps vars ctx rel nd relvar e pl = (deps, depcols, snd . fpl)
     where 
     relprefix = vnameAt relvar nd
     fpl = \rec -> let e' = exprVarSubst (\vname -> if vname == relvar && rec /= eTuple [] then rec else eVar vname) id e
@@ -309,7 +309,8 @@ exprDeps vars ctx rel nd relvar e pl = (deps, fpl)
                       ecols = nub $ concatMap I.nodeCols $ map snd $ G.labNodes $ I.plCFG pl'''
                   in (ecols, pl''')
     -- all variables occurring in the expression
-    evars = nub $ concatMap nodeVars $ map snd $ G.labNodes $ I.plCFG $ snd $ fpl $ eTuple []
+    (depcols, deppl) = fpl $ eTuple []
+    evars = nub $ concatMap nodeVars $ map snd $ G.labNodes $ I.plCFG deppl
     -- variables 
     deps = evars `intersect` (M.keys $ I.plVars pl)
     -- new variables declared in the expression

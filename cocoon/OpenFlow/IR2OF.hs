@@ -164,8 +164,8 @@ updateNode db pname portpl swid (nd, node) =
                                                              then partition fst $ filter (\(_, f) -> (C.exprIVal $ C.enode $ (C.evalConstExpr ?r (C.eField f "switch"))) == swid) $ (db M.! t)
                                                              else partition fst (db M.! t) 
                                              delcmd = concatMap (\(_,f) -> map (\O.Flow{..} -> O.DelFlow nd flowPriority flowMatch) 
-                                                                               $ mkLookupFlow pname nd f pl $ Left th) del
-                                             addcmd = concatMap (\(_,f) -> map (O.AddFlow nd) $ mkLookupFlow pname nd f pl $ Left th) add
+                                                                               $ mkLookupFlow pname nd f (snd pl) $ Left th) del
+                                             addcmd = concatMap (\(_,f) -> map (O.AddFlow nd) $ mkLookupFlow pname nd f (snd pl) $ Left th) add
                                          in return $ delcmd ++ addcmd
          I.Lookup t _ _ _ _ I.Rand    -> -- create a group for each unique combination of match columns
                                          -- create match entries in the table to forward packets to the group
@@ -182,19 +182,25 @@ updateNode db pname portpl swid (nd, node) =
     delGroup :: C.Expr -> State SwRuntimeState [O.Command]
     delGroup f = do
         s <- getNode nd
-        let (cols, _) = I.nodePL node f
+        let (cols, _) = I.nodePL node
         let f' = I.val2Record ?r ?structs (I.nodeRel node) f
         -- extract column values from f
-        let vals = map (f' M.!) cols
-        let (g, bkts) = s M.! vals
-        let bid = bkts M.! f'
+        let vals = map (\col -> case M.lookup col f' of
+                                     Nothing -> error $ "column " ++ show col ++ " not found in record " ++ show f'       
+                                     Just x  -> x) cols
+        let (g, bkts) = case M.lookup vals s of
+                             Nothing -> error $ "entry " ++ show vals ++ " not found. node: " ++ show nd
+                             Just x  -> x
+        let bid = case M.lookup f' bkts of
+                       Nothing -> error $ "bucket  " ++ show f' ++ " not found" 
+                       Just x  -> x
         let bkts' = M.delete f' bkts
         -- update counter in s M.! val; if the counter drops to 0, delete group and flow entries
         let s' = M.update (\(gid, _) -> Just (gid, bkts')) vals s
         let grcmds = if M.size bkts' == 0
                         then (O.DelGroup g) :
                              (map (\O.Flow{..} -> O.DelFlow nd flowPriority flowMatch)
-                                  $ mkLookupFlow pname nd f (I.nodePL node) $ Right [O.ActionGroup g])
+                                  $ mkLookupFlow pname nd f (snd $ I.nodePL node) $ Right [O.ActionGroup g])
                         else []
         -- remove empty group
         s'' <- if M.size bkts' == 0
@@ -212,7 +218,7 @@ updateNode db pname portpl swid (nd, node) =
                       I.Fork _ _ _ b        -> b
                       _                     -> error $ "IR2OF.addGroup " ++ show node
         s <- getNode nd
-        let (cols, _) = I.nodePL node f
+        let (cols, _) = I.nodePL node
         let f' = I.val2Record ?r ?structs (I.nodeRel node) f
         -- extract column values from f
         let vals = map (f' M.!) cols
@@ -224,7 +230,7 @@ updateNode db pname portpl swid (nd, node) =
         let g = fst $ s' M.! vals
         let grcmds = if M.size (snd $ s' M.! vals) == 0
                         then (O.AddGroup $ O.Group g gt []) :
-                             (map (O.AddFlow nd) $ mkLookupFlow pname nd f (I.nodePL node) $ Right [O.ActionGroup g])
+                             (map (O.AddFlow nd) $ mkLookupFlow pname nd f (snd $ I.nodePL node) $ Right [O.ActionGroup g])
                         else []
         -- allocate bucket id
         let bid = case M.elems $ snd $ s' M.! vals of
@@ -301,7 +307,7 @@ slice (O.EVal (O.Value _ v))     h l = O.EVal $ O.Value (h-l) $ bitSlice v h l
 mkLookupFlow :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.NodeId -> C.Expr -> I.FPipeline -> Either I.BB [O.Action] -> [O.Flow]
 mkLookupFlow pname nd val lpl b = {-trace ("mkLookupFlow " ++ show val ++ " " ++ show (I.plCFG $ snd $ lpl val)) $-} map (\m -> O.Flow 1 m as) matches
     where
-    matches = mkPLMatch (snd $ lpl val)
+    matches = mkPLMatch $ lpl val
     as = case b of 
               Left bb    -> mkBB pname nd 0 val bb
               Right acts -> acts

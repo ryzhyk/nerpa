@@ -380,10 +380,10 @@ bbCols (BB as _) = nub $ concatMap actionCols as
 data Selection = First
                | Rand
 
-type FPipeline = C.Expr -> ([ColName], Pipeline)
+type FPipeline = C.Expr -> Pipeline
 
-data Node = Fork   {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: FPipeline, nodeBB :: BB}  -- list of vars fork condition depends on (prevents these var from being optimized away)
-          | Lookup {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: FPipeline, nodeThen :: BB, nodeElse :: BB, nodeSelection :: Selection}
+data Node = Fork   {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: ([ColName], FPipeline), nodeBB :: BB}  -- list of vars fork condition depends on (prevents these var from being optimized away)
+          | Lookup {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: ([ColName], FPipeline), nodeThen :: BB, nodeElse :: BB, nodeSelection :: Selection}
           | Cond   {nodeConds :: [(Expr, BB)]}
           | Par    {nodeBBs :: [BB]}
 

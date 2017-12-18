@@ -27,7 +27,6 @@ import Data.Maybe
 --import Debug.Trace
 --import System.IO.Unsafe
 
-import Util
 import IR.IR
 
 optimize :: Int -> Pipeline -> Pipeline
@@ -150,8 +149,8 @@ varSubstNode cfg nd node = do
         node' = foldl' (\node_ (v, e) -> 
                          --trace ("substitute " ++ v ++  " with " ++ show e ++ "\n         at node " ++ show node) $
                          case node_ of
-                              Fork{..}   -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = \rec -> mapSnd (plSubstVar v e) (nodePL rec)}
-                              Lookup{..} -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = \rec -> mapSnd (plSubstVar v e) (nodePL rec)}
+                              Fork{..}   -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = (fst nodePL, \rec -> plSubstVar v e $ (snd nodePL) rec)}
+                              Lookup{..} -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = (fst nodePL, \rec -> plSubstVar v e $ (snd nodePL) rec)}
                               Cond{..}   -> node_{nodeConds = map (\(c,b) -> (exprSubstVar v e c, b)) nodeConds}
                               Par{}      -> error "IROptimize.varSubstNode Par") 
                        node substs

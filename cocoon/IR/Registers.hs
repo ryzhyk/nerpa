@@ -188,14 +188,14 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
         rename' e = e
     let g :: NodeId -> Node -> Node
         g _  node = case node of
-                         Fork t vs fpl' b         -> Fork t (vars2fnames vs) (\rec -> 
-                                                                              let (cs, pl') = fpl' rec
-                                                                                  cfg = plCFG pl' in
-                                                                              (cs, pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg})) b
-                         Lookup t vs fpl' th el s -> Lookup t (vars2fnames vs) (\rec ->   
-                                                                               let (cs, pl') = fpl' rec
-                                                                                   cfg = plCFG pl' in
-                                                                               (cs, pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg})) th el s
+                         Fork t vs (cs, fpl') b         -> Fork t (vars2fnames vs) (cs, \rec -> 
+                                                                                         let pl' = fpl' rec
+                                                                                             cfg = plCFG pl' in
+                                                                                         (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg})) b
+                         Lookup t vs (cs, fpl') th el s -> Lookup t (vars2fnames vs) (cs, \rec ->   
+                                                                                           let pl' = fpl' rec
+                                                                                               cfg = plCFG pl' in
+                                                                                           (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg})) th el s
                          Cond cs                  -> Cond $ map (mapFst rename) cs
                          Par bs                   -> Par bs
         f :: CFG -> CFGCtx -> Maybe Action
