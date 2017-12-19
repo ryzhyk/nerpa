@@ -389,7 +389,8 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
                             false
                         }
                     }
-                }
+                },
+                _ -> false
             }
         }
     }
@@ -526,7 +527,7 @@ procedure dstLookup(vport : VSwitchPort, lport : LogicalSwitchPort): sink = {
 // Send packet to specified chassis.  
 procedure sendToChassis(vport : VSwitchPort, lport : LogicalSwitchPort, dst : destination_t): sink = {
     match (dst) {
-        DSTLocal            -> vSwitchEgress(true, vport.switch, lport.lswitch),
+        DSTLocal            -> (),
         DSTChassis{chassis} -> {
             the (dtun in TunnelPort | dtun.switch == chassis) {
                 pkt.vxlan.tun_dst = dtun.externalip;
@@ -534,9 +535,10 @@ procedure sendToChassis(vport : VSwitchPort, lport : LogicalSwitchPort, dst : de
                 the (stun in TunnelPort | stun.switch == vport.switch) {
                     send PTunnelPort[stun].out
                 }
-            }
+            } default { () }
         }
-    }
+    };
+    vSwitchEgress(true, vport.switch, lport.lswitch)
 }
 
 /* Packet arrives to VSwitch ready for logical switch port egress 
