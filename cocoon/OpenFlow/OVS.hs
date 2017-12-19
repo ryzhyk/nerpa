@@ -129,15 +129,15 @@ mkCmd (OF.AddFlow t OF.Flow{..}) = vcat
                                    $ map (\m -> "flow add" <+>
                                                 commaCat [ "table=" <> pp t
                                                          , "priority=" <> pp flowPriority
-                                                         , commaCat m
+                                                         , commaCat (flowDeps flowMatch ++ m)
                                                          , "actions=" <> (commaCat $ map (mkAction False) flowActions)])
                                    $ allComb $ map mkMatch flowMatch
 mkCmd (OF.DelFlow t p ms)        = vcat 
                                    $ map (\m -> "flow delete_strict" <+>
                                                 commaCat [ "table=" <> pp t
                                                          , "priority=" <> pp p
-                                                         , commaCat m])
-                             $ allComb $ map mkMatch ms
+                                                         , commaCat (flowDeps ms ++ m)])
+                                   $ allComb $ map mkMatch ms
 mkCmd (OF.AddGroup OF.Group{..}) = "group add" <+>
                                    commaCat [ "group_id=" <> pp groupId
                                             , "type=" <> pp groupType
@@ -151,11 +151,19 @@ mkCmd (OF.DelBucket gid bid)     = "group remove_bucket" <+>
                                    "group_id=" <> pp gid <> comma <>
                                    "command_bucket_id=" <> pp bid
 
+flowDeps :: [OF.Match] -> [Doc]
+flowDeps ms = nub $ concatMap (fieldDeps . OF.matchField) ms
+
+fieldDeps :: OF.Field -> [Doc]
+fieldDeps f = case M.lookup (OF.fieldName f) matchMap of
+                   Nothing      -> error $ "OVS.fieldDeps: unknown field " ++ OF.fieldName f
+                   Just (_, ds) -> map pp ds
+
 mkMatch :: OF.Match -> [Doc]
 mkMatch OF.Match{..} = map (\m -> pp n <> "=" <> mkVal attrFormat matchVal <> m) masks
     where n = case M.lookup (OF.fieldName matchField) matchMap  of
-                   Nothing -> error $ "OVS.mkMatch: unknown field " ++ OF.fieldName matchField
-                   Just x  -> x
+                   Nothing    -> error $ "OVS.mkMatch: unknown field " ++ OF.fieldName matchField
+                   Just (x,_) -> x
           Attributes{..} = case M.lookup n matchAttributes of
                                 Nothing -> error $ "OVS.mkMatch: unknown field attributes " ++ n
                                 Just x  -> x
