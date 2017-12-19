@@ -1044,7 +1044,7 @@ def ovsSetOVS(e):
     (col, key, vals) = getTableEntry(e)
     if col == "external-ids" and key == "ovn-encap-ip":
         hypervisor = getHyhpervisor()
-        ip = mkAddress(vals[0])
+        ip = "32'h%x" % netaddr.IPAddress(vals[0])
         vxportname = hypervisor + "-vxlan"
         ovs_vsctl(["add-port", "br-int", vxportname, "--", "set", "interface", vxportname, "type=vxlan", "options:remote_ip=flow", "options:local_ip="+vals[0], "options:key=flow"])
         pnum = ovs_vsctl(["get", "Interface", vxportname, "ofport"])
