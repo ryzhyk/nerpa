@@ -144,11 +144,12 @@ updatePort pname pl i db = delcmd ++ addcmd
     addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [O.ActionGoto $ I.plEntryNode pl]) $ match f) add
 
 mkNode :: (?r::C.Refine, ?structs::B.StructReify) => String -> (I.NodeId, I.Node) -> [O.Command]
-mkNode pname (nd, node) = trace ("mkNode " ++ show nd) $
+mkNode pname (nd, node) =
     case node of
          I.Par bs                    -> [ O.AddGroup $ O.Group nd O.GroupAll $ mapIdx (\b i -> O.Bucket Nothing $ mkStaticBB pname nd i b) bs 
                                         , O.AddFlow nd $ O.Flow 0 [] [O.ActionGroup nd] ]
-         I.Cond cs                   -> map (\(m, a) -> O.AddFlow nd $ O.Flow 0 m a) $ mkCond $ mapIdx (\(c,b) i -> (c, mkStaticBB pname nd i b)) cs
+         I.Cond cs                   -> mapIdx (\(m, a) i -> O.AddFlow nd $ O.Flow i m a) 
+                                               $ reverse $ mkCond $ mapIdx (\(c,b) i -> (c, mkStaticBB pname nd i b)) cs
          I.Lookup _ _ _ _ el I.First -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pname nd 1 el]
          I.Lookup _ _ _ _ el I.Rand  -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pname nd 1 el]
          I.Fork{}                    -> []
