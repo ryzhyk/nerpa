@@ -365,13 +365,26 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
                         false
                     } default {
                         the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr6{target}) {
+                          // XXX: send to controller
+                          /*
                             pkt.dst = pkt.src;
+                            pkt.src = lpaddr.mac;
+                            pkt.payload.ip6.src = target;
+                            pkt.payload.ip6.payload.icmp6.type = 136;
+                            pkt.payload.ip6.payload.icmp6.code = 0;
+                            //pkt.payload.ip6.payload.icmp6.payload.na.target = target;
+                            pkt.payload.ip6.payload.icmp6.payload.na.tll = lpaddr.mac;
+                            // XXX: what does this compile to?
+                            // flags.loopback = 1;
+                            true */ 
+                            false
+                            /*pkt.dst = pkt.src;
                             pkt.src = lpaddr.mac;
                             pkt.payload.ip6.src = target;
                             pkt.payload.ip6.payload.icmp6.payload = ICMP6NA{ICMP6NAPkt{target, lpaddr.mac}};
                             // XXX: what does this compile to?
                             // flags.loopback = 1;
-                            true
+                            true*/
                         } default {
                             false
                         }
