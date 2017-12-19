@@ -192,7 +192,7 @@ mkAction _ OF.ActionDrop                                 = "drop"
 mkAction _ (OF.ActionSet l r@OF.EVal{})                  = "load:" <> mkExprA r <> "->" <> mkExprA l
 mkAction _ (OF.ActionSet l r)                            = "move:" <> mkExprA r <> "->" <> mkExprA l
 mkAction False (OF.ActionGoto t)                             = "goto_table:" <> pp t
-mkAction True (OF.ActionGoto t)                             = "resubmit" <> (parens $ pp t)
+mkAction True (OF.ActionGoto t)                             = "resubmit" <> (parens $ comma <> pp t)
 mkAction _ OF.ActionController                           = "controller"
 mkAction _ (OF.ActionBuiltin "ct" [zone])                = "ct(zone=" <> mkExprA zone <> ")"
 mkAction _ (OF.ActionBuiltin "ct_commit" [zone])         = "ct(commit, zone=" <> mkExprA zone <> ")"
