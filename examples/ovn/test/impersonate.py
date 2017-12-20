@@ -18,6 +18,7 @@ import string
 import netaddr
 import pickle
 import csv
+import itertools
 
 class PersistentStore:
     """Very simple key-value store.  Keys are strings, values are arbitrary Python objects."""
@@ -925,6 +926,8 @@ def ovnLspSetAddresses(cmd):
     addrs = getList(getField(cmd, 'Addresses'), 'Address', 'Addresses')
     addr_strs = map(addrStr, addrs)
     log('adding switch port addresses ' + port + ' ' + ','.join(addr_strs))
+
+    cocoon("{LogicalSwitchPortMAC.delete(?.lport==" + mkId(port, 8) + "); LogicalSwitchPortIP.delete(?.lport==" + mkId(port, 8) + ")}")
     for addr in addrs:
         addrtype = addr.children[0].symbol.name
         if addrtype == "unknown":
@@ -937,9 +940,9 @@ def ovnLspSetAddresses(cmd):
         else:
             mac = mkMACAddr(getField(addr, 'EthAddress').value)
             cocoon("LogicalSwitchPortMAC.put(LogicalSwitchPortMAC{" + mkId(port, 8) + ", " + mac + "})")
-            ips = map(mkIPAddr,
-                      filter(lambda x: x.children[0].symbol.name != "invalid",
-                             getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList')))
+            ips = map(mkIPAddr, 
+                      itertools.takewhile(lambda x: x.children[0].symbol.name != "invalid", 
+                                          getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList')))
             log("ips: " + str(ips))
             for ip in ips:
                 cocoon("LogicalSwitchPortIP.put(LogicalSwitchPortIP{" + mkId(port, 8) + ", " + mac + ", " + ip + "})")
