@@ -17,6 +17,51 @@ import os
 import string
 import netaddr
 
+class PersistentStore:
+    """Very simple key-value store.  Both keys and values are strings."""
+    def set(self, key, value):
+        print(key, "=", value)
+        self.dict[key] = value
+
+    def get(self, key):
+        return self.dict[key]
+
+    def __init__(self, storageFile):
+        self.storageFile = storageFile
+        self.dict = {}
+        self.read()
+
+    def clear(self):
+        self.dict = {}
+
+    def read(self):
+        lines = []
+        try:
+            with open(self.storageFile, "r") as file:
+                print("Reading ", self.storageFile)
+                lines = file.read().splitlines()
+        except IOError:
+            # The file does not exist yet; treat it as empty
+            pass
+
+        key = None
+        for line in lines:
+            if key is None:
+                key = line
+            else:
+                self.set(key, line)
+                key = None
+
+    def write(self):
+        with open(self.storageFile, "w") as file:
+            for (k, v) in self.dict.items():
+                # write each key and value on a separate line
+                file.write(k + "\n")
+                file.write(v + "\n")
+
+    def close(self):
+        self.write()
+
 # These are grammars in the parglare parser generator syntax for
 # parsing (a subset of) the ovn-nbctl/ovs-vsctl command-line
 # arguments.  The specification for the syntax is obtained from the
@@ -614,7 +659,7 @@ symTable = { 'inport'         : [("p.portnum"                        , None)]
            , 'eth.src'        : [("p.src"                            , None)]
            , 'eth.dst'        : [("p.dst"                            , None)]
            , 'eth.type'       : [("p.ethtype"                        , None)]
-#           , 'vlan.tci'       : 
+#           , 'vlan.tci'       :
            , 'vlan.vid'       : [("p.vlan.vid"                       , None)]
            , 'vlan.pcp'       : [("p.vlan.pcp"                       , None)]
            , 'ip.proto'       : [("ip4.proto"                        , matchIP4)
@@ -642,7 +687,7 @@ symTable = { 'inport'         : [("p.portnum"                        , None)]
 #           , 'nd.tll'         :
 #           , 'ct_mark'        :
 #           , 'ct_label'       :
-#           , 'ct.trk'         :  
+#           , 'ct.trk'         :
 #           , 'ct.new'         :
 #           , 'ct.est'         :
 #           , 'ct.rel'         :
@@ -651,11 +696,11 @@ symTable = { 'inport'         : [("p.portnum"                        , None)]
 
            , 'eth.bcast'      : [("p.dst == 48'hffffffffffff"       , None)]
            , 'eth.mcast'      : [("p.dst[40:40] == 1"               , None)]
-#           , 'vlan.present'   : 
+#           , 'vlan.present'   :
            , 'ip4'            : [("true"                            , matchIP4)]
            , 'ip4.mcast'      : [("ip4.dst[31:28] == 4'he"          , matchIP4)]
            , 'ip6'            : [("true"                            , matchIP6)]
-           , 'ip'             : [("true"                            , matchIP4) 
+           , 'ip'             : [("true"                            , matchIP4)
                                 ,("true"                            , matchIP6)]
            , 'icmp4'          : [("true"                            , matchICMP4)]
            , 'icmp6'          : [("true"                            , matchICMP6)]
@@ -773,14 +818,14 @@ def mkId(name, w):
     return str(w*8)+ "'h" + "".join(map(lambda x: "%02x"%x, map(ord, list(name))))
 
 def mkMACAddr(mac):
-    return "48'h%x" % int(netaddr.EUI(mac)) 
+    return "48'h%x" % int(netaddr.EUI(mac))
 
 def mkIPAddr(ip):
     if ip.children[0].symbol.name == 'Ipv4Address':
         return "IPAddr4{32'h%x}" % netaddr.IPNetwork(ip.children[0].children[0].value).ip
     elif ip.children[0].symbol.name == 'Ipv6Address':
         return "IPAddr6{128'h%x}" % netaddr.IPNetwork(ip.children[0].children[0].value).ip
-    else: 
+    else:
         raise Exception("not implemented: mkIPAddr " + ip.children[0].symbol.name)
 
 def mkAddress(addr):
@@ -790,7 +835,7 @@ def mkAddress(addr):
         return "IPAddr4{32'h%x}" % netaddr.IPAddress(addr)
     elif netaddr.valid_ipv6(addr):
         return "IPAddr6{128'h%x}" % netaddr.IPAddress(addr)
-    else: 
+    else:
         raise Exception("unknown address format " + addr)
 
 def mkIPSubnet(ip):
@@ -799,7 +844,7 @@ def mkIPSubnet(ip):
         return "IPSubnet4{IP4Subnet{32'h%x/%d}}" % (net.ip, net.prefixlen)
     elif ip.children[0].symbol.name == 'Ipv6Address':
         return "IPSubnet6{IP6Subnet{128'h%x/%d}}" % (net.ip, net.prefixlen)
-    else: 
+    else:
         raise Exception("not implemented: mkIPSubnet " + ip.children[0].symbol.name)
 
 def getTableEntry(entry):
@@ -874,7 +919,7 @@ def ovnLspAdd(cmd):
         log('adding switch port ' + sw + ' ' + port)
         # XXX: hack: we currently don't have a way to generate unique zone id's
         zone = port.translate(None, string.ascii_letters)
-        cocoon('LogicalSwitchPort.put(LogicalSwitchPort{' + 
+        cocoon('LogicalSwitchPort.put(LogicalSwitchPort{' +
                  ', '.join([mkId(port, 8), mkSwId(sw), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', zone]) + '})')
     return False
 
@@ -895,8 +940,8 @@ def ovnLspSetAddresses(cmd):
         else:
             mac = mkMACAddr(getField(addr, 'EthAddress').value)
             cocoon("LogicalSwitchPortMAC.put(LogicalSwitchPortMAC{" + mkId(port, 8) + ", " + mac + "})")
-            ips = map(mkIPAddr, 
-                      filter(lambda x: x.children[0].symbol.name != "invalid", 
+            ips = map(mkIPAddr,
+                      filter(lambda x: x.children[0].symbol.name != "invalid",
                              getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList')))
             log("ips: " + str(ips))
             for ip in ips:
@@ -1198,9 +1243,26 @@ def testIpConversion():
     bytes = convertIpToBytes('2001:db8::1')
     assert bytes == "20010db8000000000000000000000001", bytes
 
+def testStorage():
+    storage = PersistentStore("./x")
+    storage.clear()
+    storage.set("a", "10")
+    value = storage.get("a")
+    assert value == "10", value
+    storage.set("b", "20")
+    value = storage.get("b")
+    assert value == "20"
+    storage.close()
+
+    storage1 = PersistentStore("./x")
+    value = storage1.get("a")
+    assert value == "10", value
+    storage1.close()
+
 def test():
     testIpConversion()
     testIpMatch()
+    testStorage()
     testStrings(ovnTestLines, getOvnParser())
     testStrings(ovsTestLines, getOvsParser())
 
