@@ -223,11 +223,11 @@ view UnknownMACChassis ( sender  : chassis_id_t
 
 UnknownMACChassis(sender, lswitch, DSTLocal) :-
     Chassis(sender, f, _, _), f==false, 
-    LPortUnknownMACChassis(_, lswitch, sender, _)
+    LPortUnknownMACChassis(lswitch, _, sender, _)
 
 UnknownMACChassis(sender, lswitch, DSTChassis{chassis}) :-
     Chassis(sender, f, _, _), f==false, 
-    LPortUnknownMACChassis(_, lswitch, chassis, fl), ((not fl) and (chassis != sender))
+    LPortUnknownMACChassis(lswitch, _, chassis, fl), ((not fl) and (chassis != sender))
 
 // Tunnels between pairs of distinct chassis
 view TunnelFromTo( fromChassis: chassis_id_t
