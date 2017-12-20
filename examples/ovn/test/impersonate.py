@@ -16,11 +16,13 @@ import ipaddress
 import os
 import string
 import netaddr
+import pickle
+import csv
 
 class PersistentStore:
-    """Very simple key-value store.  Both keys and values are strings."""
+    """Very simple key-value store.  Keys are strings, values are arbitrary Python objects."""
     def set(self, key, value):
-        print(key, "=", value)
+        # print(key, "=", value)
         self.dict[key] = value
 
     def get(self, key):
@@ -39,25 +41,20 @@ class PersistentStore:
         try:
             with open(self.storageFile, "r") as file:
                 print("Reading ", self.storageFile)
-                lines = file.read().splitlines()
+                reader = csv.reader(file)
+                for k, v in reader:
+                    vs = pickle.loads(v)
+                    self.set(k, vs)
         except IOError:
             # The file does not exist yet; treat it as empty
             pass
 
-        key = None
-        for line in lines:
-            if key is None:
-                key = line
-            else:
-                self.set(key, line)
-                key = None
-
     def write(self):
         with open(self.storageFile, "w") as file:
+            writer = csv.writer(file)
             for (k, v) in self.dict.items():
-                # write each key and value on a separate line
-                file.write(k + "\n")
-                file.write(v + "\n")
+                vs = pickle.dumps(v)
+                writer.writerow([k, vs])
 
     def close(self):
         self.write()
@@ -1246,16 +1243,26 @@ def testIpConversion():
 def testStorage():
     storage = PersistentStore("./x")
     storage.clear()
-    storage.set("a", "10")
-    value = storage.get("a")
+    storage.set("c", "10")
+    value = storage.get("c")
     assert value == "10", value
     storage.set("b", "20")
     value = storage.get("b")
     assert value == "20"
+    storage.set("a", 10)
+    value = storage.get("a")
+    assert value == 10, value
+    storage.set("b", [10, 20, 30])
+    value = storage.get("b")
+    assert value == [10, 20, 30], value
     storage.close()
 
     storage1 = PersistentStore("./x")
     value = storage1.get("a")
+    assert value == 10, value
+    value = storage1.get("b")
+    assert value == [10, 20, 30], value
+    value = storage1.get("c")
     assert value == "10", value
     storage1.close()
 
