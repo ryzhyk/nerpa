@@ -529,8 +529,8 @@ procedure sendToChassis(vport : VSwitchPort, lport : LogicalSwitchPort, dst : de
     match (dst) {
         DSTLocal            -> (),
         DSTChassis{chassis} -> {
-            the (dtun in TunnelPort | dtun.switch == chassis) {
-                pkt.vxlan.tun_dst = dtun.externalip;
+            the (dtun in TunnelFromTo | dtun.toChassis == chassis and dtun.fromChassis == vport.switch) {
+                pkt.vxlan.tun_dst = dtun.toip;
                 pkt.vxlan.tun_id  = lport.lswitch;
                 the (stun in TunnelPort | stun.switch == vport.switch) {
                     send PTunnelPort[stun].out
