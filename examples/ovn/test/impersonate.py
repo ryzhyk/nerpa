@@ -764,10 +764,13 @@ def mkDirection(d):
     else:
         raise Exception("unsupported ACL direction :" + d)
 
-def mkId(swname, w):
-    if len(swname) > w:
-        raise Exception("mkId(" + swname + "," + str(w) + "): identifier too long")
-    return str(w*8)+ "'h" + "".join(map(lambda x: "%02x"%x, map(ord, list(swname))))
+def mkSwId(swname):
+    return mkId(swname[-3:], 8)
+
+def mkId(name, w):
+    if len(name) > w:
+        raise Exception("mkId(" + name + "," + str(w) + "): identifier too long")
+    return str(w*8)+ "'h" + "".join(map(lambda x: "%02x"%x, map(ord, list(name))))
 
 def mkMACAddr(mac):
     return "48'h%x" % int(netaddr.EUI(mac)) 
@@ -854,7 +857,7 @@ def ovnLsAdd(cmd):
     swopt = getField(cmd, 'Switch_opt')
     swname = getField(swopt, 'Switch').children[0].value
     log('adding switch ' + swname)
-    cocoon('LogicalSwitch.put(LogicalSwitch{' + mkId(swname, 8) + ', LSwitchRegular, "' + swname + '", NoSubnet})')
+    cocoon('LogicalSwitch.put(LogicalSwitch{' + mkSwId(swname) + ', LSwitchRegular, "' + swname + '", NoSubnet})')
     return False
 
 def ovnLspAdd(cmd):
@@ -872,7 +875,7 @@ def ovnLspAdd(cmd):
         # XXX: hack: we currently don't have a way to generate unique zone id's
         zone = port.translate(None, string.ascii_letters)
         cocoon('LogicalSwitchPort.put(LogicalSwitchPort{' + 
-                 ', '.join([mkId(port, 8), mkId(sw, 8), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', zone]) + '})')
+                 ', '.join([mkId(port, 8), mkSwId(sw), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', zone]) + '})')
     return False
 
 def ovnLspSetAddresses(cmd):
@@ -941,7 +944,7 @@ def ovnAclAdd(cmd):
     match     = mkExpr(getField(cmd, 'Match').children[0])
     verdict   = mkVerdict(getField(cmd, 'Verdict').children[0].value)
     log('acl-add ' + ' '.join([sw, direction, prio, match, verdict]))
-    cocoon("ACL.put(ACL{" + ", ".join([mkId(sw, 8), prio, direction, "\\(p:Packet, lp:lport_id_t): bool =" + match, verdict])  + "})")
+    cocoon("ACL.put(ACL{" + ", ".join([mkSwId(sw), prio, direction, "\\(p:Packet, lp:lport_id_t): bool =" + match, verdict])  + "})")
     return False
 
 def ovnCreate(cmd):
