@@ -873,10 +873,12 @@ def getOptField(node, field, default):
 
 def impersonateOVN(line):
     parser = getOvnParser()
+    options = None
     try:
         options = parseOptions(parser, line)
     except parglare.exceptions.ParseError as e:
-        print impersonate, "error parsing", "`" + line + "'", str(e)
+        print "error parsing:", line, str(e)
+        raise e
 
     log('\novn-nbctl' + line)
     log(options.tree_str())
