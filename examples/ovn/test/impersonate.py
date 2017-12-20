@@ -184,6 +184,7 @@ Priority
 Switch
 : Identifier
 | /'[^']*'/
+| /"[^"]*"/
 ;
 
 Router
@@ -944,8 +945,8 @@ def ovnLspSetAddresses(cmd):
         else:
             mac = mkMACAddr(getField(addr, 'EthAddress').value)
             cocoon("LogicalSwitchPortMAC.put(LogicalSwitchPortMAC{" + mkId(port, 8) + ", " + mac + "})")
-            ips = map(mkIPAddr, 
-                      itertools.takewhile(lambda x: x.children[0].symbol.name != "invalid", 
+            ips = map(mkIPAddr,
+                      itertools.takewhile(lambda x: x.children[0].symbol.name != "invalid",
                                           getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList')))
             log("ips: " + str(ips))
             for ip in ips:
@@ -1211,6 +1212,7 @@ ovn-nbctl --timeout=30 create Address_Set name=set1 'addresses="f0:00:00:00:00:1
 ovn-nbctl --timeout=30 acl-add lsw0 to-lport 1000 'eth.type == 0x1237 && eth.src == $set1 && outport == "lp33"' drop
 ovn-nbctl --timeout=30 lsp-set-addresses lp13 'f0:00:00:00:00:13 192.168.0.13 invalid 192.169.0.13'
 ovn-nbctl --timeout=30 lsp-add ls2 ln2 '' 101
+ovn-nbctl lsp-add ls_name ln_port_name "" 101
 """
 
 ovsTestLines = """
@@ -1237,6 +1239,7 @@ ovs-vsctl --timeout=30 -- set Interface br-phys options:tx_pcap=/home/mbudiu/git
 ovs-vsctl --timeout=30 -- set Open_vSwitch . external-ids:system-id=hv1 -- set Open_vSwitch . external-ids:ovn-remote=unix:/home/mbudiu/git/ovs/tests/testsuite.dir/2317/ovn-sb/ovn-sb.sock -- set Open_vSwitch . external-ids:ovn-encap-type=geneve,vxlan -- set Open_vSwitch . external-ids:ovn-encap-ip=192.168.0.1 -- add-br br-int -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
 ovs-vsctl --timeout=30 -- set Open_vSwitch . external-ids:system-id=hv2 -- set Open_vSwitch . external-ids:ovn-remote=unix:/home/mbudiu/git/ovs/tests/testsuite.dir/2317/ovn-sb/ovn-sb.sock -- set Open_vSwitch . external-ids:ovn-encap-type=geneve,vxlan -- set Open_vSwitch . external-ids:ovn-encap-ip=192.168.0.2 -- add-br br-int -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
 ovs-vsctl --timeout=30 -- set Open_vSwitch . external-ids:system-id=hv3 -- set Open_vSwitch . external-ids:ovn-remote=unix:/home/mbudiu/git/ovs/tests/testsuite.dir/2317/ovn-sb/ovn-sb.sock -- set Open_vSwitch . external-ids:ovn-encap-type=geneve,vxlan -- set Open_vSwitch . external-ids:ovn-encap-ip=192.168.0.3 -- add-br br-int -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
+
 """
 
 def testStrings(str, parser):
