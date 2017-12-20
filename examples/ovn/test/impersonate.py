@@ -23,7 +23,7 @@ import itertools
 class PersistentStore:
     """Very simple key-value store.  Keys are strings, values are arbitrary Python objects."""
     def set(self, key, value):
-        # print(key, "=", value)
+        #print(key, "=", value)
         self.dict[key] = value
 
     def get(self, key):
@@ -41,7 +41,7 @@ class PersistentStore:
         lines = []
         try:
             with open(self.storageFile, "r") as file:
-                print("Reading ", self.storageFile)
+                #print("Reading ", self.storageFile)
                 reader = csv.reader(file)
                 for k, v in reader:
                     vs = pickle.loads(v)
@@ -504,6 +504,7 @@ Vals
 logfile = open(os.environ.get("OVSHOME") + "/test.log", 'a')
 cocoon_path = os.environ.get("COCOON_PATH")
 ovs_rundir = os.environ.get("OVS_RUNDIR")
+storefile = os.environ.get("OVSHOME") + "/test.store"
 
 def getHyhpervisor():
     return os.path.basename(os.path.normpath(ovs_rundir))
@@ -761,10 +762,13 @@ def mkConst(const):
     elif sym == 'String':
         return [const.children[0].value]
     elif sym == 'VariableName':
-        addrs = ovs_vsctl(["--columns=addresses", "find", "Address_Set", "name=" + const.children[0].children[1].value])
-        log("address list: " + addrs)
-        vals = val_parser.parse(addrs[addrs.find("[") + 1 : addrs.find("]")]).children[0]
-        return map(lambda x: mkAddress(x.value[1:-1]), getList(vals, 'SimpleValue', 'Value'))
+        store = PersistentStore(storefile)
+        vals = store.get(const.children[0].children[1].value)
+        store.close()
+        #ovs_vsctl(["--columns=addresses", "find", "Address_Set", "name=" + const.children[0].children[1].value])
+        log("address list: " + str(vals))
+        #vals = val_parser.parse(addrs[addrs.find("[") + 1 : addrs.find("]")]).children[0]
+        return map(lambda x: mkAddress(x[1:-1]), vals)
     else:
         raise Exception('Invalid constant ' + const.tree_str())
 
@@ -995,8 +999,15 @@ def ovnAclAdd(cmd):
 def ovnCreate(cmd):
     table = getField(cmd, 'Table').children[0].value
     entries = getList(getField(cmd, 'TableEntry_1'), 'TableEntry', 'TableEntry_1')
+    d = dict(map(lambda x: (x[0], x[2]), map(getTableEntry, entries)))
+    if table == "Address_Set":
+        key = d['name'][0]
+        vals = d['addresses']
+        store = PersistentStore(storefile)
+        store.set(key, vals)
+        store.close()
     log('create ' + table + ' ' + ' '.join(map(formatTableEntry, entries)))
-    return True
+    return False
 
 ovnHandlers = { 'init'               : ovnInit
               , 'LsAdd'              : ovnLsAdd
