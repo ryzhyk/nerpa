@@ -352,8 +352,7 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
                             pkt.payload.arp.tha = sha;
                             pkt.payload.arp.sha = lpaddr.mac;
                             pkt.payload.arp.spa = tpa;
-                            // XXX: what does this compile to?
-                            // flags.loopback = 1;
+                            pkt.payload.arp.tpa = spa;
                             true
                         } default {
                             false
@@ -374,8 +373,6 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
                             pkt.payload.ip6.payload.icmp6.code = 0;
                             //pkt.payload.ip6.payload.icmp6.payload.na.target = target;
                             pkt.payload.ip6.payload.icmp6.payload.na.tll = lpaddr.mac;
-                            // XXX: what does this compile to?
-                            // flags.loopback = 1;
                             true */ 
                             false
                             /*pkt.dst = pkt.src;
@@ -475,6 +472,7 @@ procedure bounce(vport: VSwitchPort, lport : LogicalSwitchPort): sink = {
         LPortVIF { par, _, tag } -> pkt.vlan = VLAN{0, tag},
         _                        -> ()
     };
+    pkt.portnum = 0;
     send PVSwitchPort[vport].out
 }
 
