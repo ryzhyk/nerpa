@@ -161,12 +161,12 @@ function portSecARP(lport: LogicalSwitchPort, p: Packet): bool = {
 }
 
 function ingressPortSecNDP(lport: LogicalSwitchPort, p: Packet): bool = {
-    match (p) {
-        EthPacket {_,_,_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{_, sll}}}}}}} -> 
+    match (p.payload) {
+        EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{_, sll}}}}}} -> 
             the (psec in PortSecurityMAC | psec.lport == lport.id and psec.mac == p.src and psec.mac == sll) {
                 true
             } default { false },
-        EthPacket {_,_,_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NA{ICMP6NAPkt{target, tll}}}}}}} -> 
+        EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NA{ICMP6NAPkt{target, tll}}}}}} -> 
             the (psec in PortSecurityIP6Match | psec.lport == lport.id and psec.mac == p.src and psec.mac == tll and ip6Match(target, psec.subnet)) {
                 true
             } default { false },
@@ -346,13 +346,7 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
                         false
                     } default {
                         the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr4{tpa}) {
-                            pkt.dst = pkt.src;
-                            pkt.src = lpaddr.mac;
-                            pkt.payload.arp.op = ARPReply;
-                            pkt.payload.arp.tha = sha;
-                            pkt.payload.arp.sha = lpaddr.mac;
-                            pkt.payload.arp.spa = tpa;
-                            pkt.payload.arp.tpa = spa;
+                            mkARPResp(lpaddr.mac, tpa);
                             true
                         } default {
                             false
@@ -594,7 +588,9 @@ procedure lportEgress(lport: LogicalSwitchPort, chassis : chassis_id_t): sink = 
 
 procedure deliver(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
     match (lport.ptype) {
-        LPortRouter{_}   -> drop, // XXX: TODO
+        LPortRouter{rpid}   -> the (rport in LogicalRouterPort | rport.id == rpid} ){
+                                   lrouterIngress(rport, chassis)
+                               } default { drop }, 
         _ -> ()
     };
 
@@ -677,5 +673,465 @@ function ipDstMatch(p: eth_payload_t, subnet: ip_subnet_t): bool = {
 }
 
 procedure tunIngress(port: TunnelPort): sink = {
-    vSwitchEgress(false, port.switch, pkt.vxlan.tun_id)
+    if (pkt.vlan.tun_id[23:23] == 0) {
+        vSwitchEgress(false, port.switch, pkt.vxlan.tun_id)
+    } else {
+        rportEgress(port.switch, pkt.vxlan.tun_id)
+    }
+}
+
+procedure lrouterIngress(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
+    if (not rport.enabled) { drop };
+
+    // L2 admission control
+    if (not l2AdmissionControl(rport, chassis)) { drop };
+
+    // L3 admission control
+    if (not l3AdmissionControl(rport)) { drop };
+
+    // ARP request and response processing
+    if (rportARPReq(rport, chassis)) {
+        rportBounce(rport, chassis)
+    };
+
+    // address learning
+    match (pkt.payload) {
+        EthARP{ARPPkt{ARPReply, spa, tpa, sha, tha}} -> ctlPutARP(rport.id, spa, sha),
+        _ -> ()
+    };
+
+    // process IP packets for IP addresses owned by the router
+    rportIP(rport, chassis))
+}
+
+procedure l2AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
+    if (pkt.vlan.vid != 0 or ethMulticastAddr(pkt.src)) {
+        false
+    } else if (ethMulticastAddr(pkt.dst) or pkt.dst == rport.mac) {
+        match(rport.ptype){
+            LRPRegular    -> true,
+            LRPGateway{c} -> c == chassis
+        }
+    } else {
+        // XXX: Why does this rule only apply to DNAT_SNAT rules
+        the (nat in NATChassis | isGatewayPort(rport) and nat.lrouter == rport.lrouter and nat.ntype == DNAT_SNAT and 
+                                 nat.external_mac == SomeMACAddr{pkt.dst} and chassis = nat.chassis) {
+        } default { false }
+    }
+}
+
+
+procedure l3AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
+    srcip = pktSrcIPAddr(pkt);
+    match (pkt.payload) {
+        EthIP4{ip4} -> {
+            if (ip4MulticastAddr(ip4.src) or ip4.src == 32'hffffffff or 
+                ip4.src[31:24] == 127 or ip4.dst[31:24] == 127 or
+                ip4.src[31:24] == 0 or ip4.dst[31:24] == 0) {
+                false
+            } else {
+                the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and 
+                                             match (lrn.network) {
+                                                 IP4Subnet{addr, mask} -> ip4.src == (addr | ~mask)
+                                                 _                     -> false
+                                             }) {
+                    false
+                } default { true }
+            }
+        }, 
+        _ -> true
+    } and {
+        the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and SomeIPAddr{ipSubnetAddr(lrn.network)} == srcip) {
+            // XXX: unless REG_BIT_EGRESS_LOOPBACK
+            false
+        } default { true }
+    }
+}
+
+
+// Returns true iff the packet must be bounced back to the sender
+procedure rportARPReq(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
+    match (pkt.payload) {
+        EthARP{ARPPkt{ARPRequest, spa, tpa, sha, tha}}) -> {
+            the (lrn in LRouterPortNetwork | lrn.lport == rport.id and 
+                                             (rport.ptype == LRPRegular or rport.ptype == LRPGateway{chassis}) and
+                                             match (lrn.network) {
+                                                 IPSubnet4{sn4} -> tpa == sn4.addr,
+                                                 _              -> false 
+                                             }) {
+                mkARPResp(rport.mac, lrn.network.ip4_subnet.addr);
+                true
+            } default {
+                the (lrvip in LRouterLBVIP | lrvip.lrouter == rport.lrouter and tpa == lrvip.vip) {
+                    mkARPResp(rport.mac, lrvip.vip);
+                    true
+                } default {
+                    the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == DNAT or nat.ntype == DNAT_SNAT) and
+                                      nat.external_ip == tpa and 
+                                         (rport.ptype == LRPRegular or
+                                          match (nat.external_mac) {
+                                              NoMACAddr -> rport.ptype == LRPGateway{chassis} or 
+                                              _         -> false
+                                          })) {
+                        mkARPResp(rport.mac, lrvip.vip);
+                        true
+                    } default {
+                        the (nat in NATChassis | nat.lrouter == rport.lrouter and (nat.ntype == DNAT or nat.ntype == DNAT_SNAT) and
+                                                 nat.external_ip == tpa and 
+                                                 match (rport.type) {
+                                                     LRPGateway{_} -> chassis == nat.chassis,
+                                                     _             -> false
+                                                 }) {
+                            mkARPResp(nat.external_mac, lrvip.vip);
+                            true
+                        } 
+                    }
+                }
+            }
+        },
+        _ -> false  
+    }
+}
+
+procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
+    var handled : bool;
+    // IP packets that are handled locally by the router
+    match (pkt.payload) {
+        // ICMP6 NA
+        EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NA{ICMP6NAPkt{target, tll}}}}}} -> {
+            ctlPutND(rport.id, target, tll) // sink
+        },
+        // ICMP6 NS
+        EthIP6{IP6Pkt{_,_,_,_,_,src,dst,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{target, sll}}}}}} ->  {
+            the (lrn in LRouterPortNetwork | lrn.lport == rport.id and 
+                                             (rport.ptype == LRPRegular or rport.ptype == LRPGateway{chassis}) and
+                                             match (lrn.network) {
+                                                IPSubnet6{sn6} -> sn6.addr == target and dst == target
+                                                _              -> false
+                                             }) {
+                ctlMkNA(rport.id, src, sll, lrn.network.ip6_subnet.addr, rport.mac);
+                rportBounce(rport, chassis) // sink
+            } default { 
+                ctlPutND(rport.id, src, sll) // sink
+            }
+        },
+        // ICMP4 echo
+        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,dst,IPICMP4{ICMP4Pkt{type, code}}}} -> {
+            the (lrn in LRouterNetwork | type == 8 and code == 0 and lrn.lrouter == rport.lrouter and 
+                                         match (lrn.network) {
+                                            IPSubnet4{sn4} -> sn4.addr == dst
+                                            _              -> false
+                                         }) {
+                pkt.payload.ip4.dst = pkt.payload.ip4.src;
+                pkt.payload.ip4.ttl = 255;
+                pkt.payload.ip4.icmp4.type = 0
+                handled = true
+            } default { () }
+        },
+        // ICMP6 echo
+        EthIP6{IP6Pkt{_,_,_,_,_,_,dst,IPICMP6{ICMP6Pkt{type, code, _}}}} -> {
+            if (type == 128 and code == 0) {
+                the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and 
+                                             match (lrn.network) {
+                                                IPSubnet6{sn6} -> sn6.addr == dst
+                                                _              -> false
+                                             }) {
+                    pkt.payload.ip6.dst = pkt.payload.ip6.src;
+                    pkt.payload.ip6.ttl = 255;
+                    pkt.payload.ip6.icmp6.type = 129;
+                    handled = true
+                } default { () }
+            } else { }
+        },
+        _ -> { () }
+    };
+    
+    // drop packets sent for router's IP address that it is not expected to handle
+    if (not handled) {
+        match (pkt.payload) {
+            EthIP4{IP4Pkt{_,_,_,_,_,_,ttl,_,_,dst,_}} -> {
+                the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and 
+                                             match (lrn.network) {
+                                                 IPSubnet4{sn4} -> sn4.addr == dst
+                                                 _              -> false
+                                             }) {
+                    the (nat in NAT | nat.lrouter == rport.lrouter and nat.external_ip == lrn.ip4_subnet.addr and 
+                                      (nat.ntype == SNAT or nat.ntype == DNAT_SNAT)) {
+                        ()
+                    } default { drop }
+                } default {
+                    if (ttl == 0 or ttl == 1) { drop };
+                }
+            },
+            EthIP6{IP6Pkt{_,_,ttl,_,_,_,dst,_}} -> {
+                the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and 
+                                             match (lrn.network) {
+                                                 IPSubnet6{sn6} -> sn6.addr == dst
+                                                 _              -> false
+                                             }) {
+                    drop
+                } 
+        // ICMP6 NSdefault {
+                    if (ttl == 0 or ttl == 1) { drop };
+                }
+            }
+        };  
+        if (ethBroadcastAddr(pkt.dst)) { drop }
+    };
+
+    // ingress NAT
+    var nat_redirect = false;
+    if (unsnat(rport, chassis)) {
+        nat_redirect = true
+    };
+    if (dnat(rport, chassis)) {
+        nat_redirect = true
+    };
+
+    // IP routing
+    if (nat_redirect) {
+        dec_ttl();
+        the (gwport in LogicalRouterPort | gwport.lrouter == rport.lrouter and rportIsGW(gwport.type)) {
+            pkt.dst = gwport.mac
+        }
+    } else {
+        var rt: Route;
+        match (route(rport, chassis)) {
+            NoRoute      -> drop,
+            SomeRoute{r} -> rt = r
+        };
+        // ARP/ND resolution
+        resolve(rport, chassis, rt);
+    
+        // gateway redirect
+        the (orport in LogicalRouterPort | orport.id = rt.outport) {
+            if (pkt.dst == 0 and rportIsGW(orport.ptype)) {
+                nat_redirect = true
+            } else {
+                the  (nat in NAT | nat.lrouter == rport.lrouter and nat.logical_ip == pktSrcIP(pkt) and (nat.logical_port != NoLPortId)) { () }
+                default { 
+                    if rportIsGW(orport.ptype) {
+                        nat_redirect = true 
+                    }
+                }
+            }
+        }
+    };
+    
+    // ARP request
+    if (pkt.dst == 0) {
+        pkt.dst = 48'hffffffffffff;
+        pkt.payload = EthARP{ARPPkt{ARPRequest, route.outportip, route.nexthop, pkt.src, 48'hffffffffffff}}
+    };
+
+    if (nat_redirect) {
+        (rport.ptype.redirectChassis != chassis) {
+            the (dtun in TunnelFromTo | dtun.toChassis == rport.ptype.redirectChassis and dtun.fromChassis == chassis) {
+                pkt.vxlan.tun_dst = dtun.toip;
+                pkt.vxlan.tun_id  = rport.lrouter;
+                the (stun in TunnelPort | stun.switch == chassis) {
+                    send PTunnelPort[stun].out
+                }
+            } default { () }
+        }
+    };
+
+    rportEgress(chassis, rt.outport)
+}
+
+procedure unsnat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
+    match (pkt.payload, rport.ptype) {
+        (EthIP4{ip4}, LRPGateway{rchassis}) -> {
+            the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == SNAT or nat.ntype == DNAT_SNAT) and ip4.dst == nat.external_ip) {
+                match (nat.external_mac) {
+                    NoMACAddr -> {
+                        if (chassis == rchassis) {
+                            ct_snat();
+                            false
+                        } else {
+                            true
+                        }
+                    },
+                    SomeMACAddr{_} -> ct_snat()
+                }
+            } default { false }
+        },
+        _ -> false
+    }
+}
+
+procedure dnat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
+    match (pkt.payload, rport.ptype) {
+        (EthIP4{ip4}, LRPGateway{rchassis}) -> {
+            the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == DNAT or nat.ntype == DNAT_SNAT) and ip4.dst == nat.external_ip) {
+                match (nat.external_mac) {
+                    NoMACAddr -> {
+                        if (chassis == rchassis) {
+                            ct_dnat(nat.logical_ip);
+                            false
+                        } else {
+                            true
+                        }
+                    },
+                    SomeMACAddr{_} -> ct_dnat(nat.logical_ip)
+                }
+            } default { false }
+        },
+        _ -> false
+}
+
+procedure route(nat_redirect bool, rport : LogicalRouterPort, chassis : chassis_id_t) : Route = {
+        match (pkt.payload) {
+            EthIP4{ip4} -> {
+                the (r in Route | lrouter == rport.lrouter and
+                                  match(r.ip_prefix) {
+                                      IP4Subnet{sn4} -> ip4Match(ip4.dst, sn4),
+                                      _ -> false
+                                  }) {
+                    dec_ttl();
+                    pkt.src = r.outportmac;
+                    SomeRoute{r}
+                } default { NoRoute }
+            },
+            EthIP6{ip6} -> the (r in Route | ) {
+                the (r in Route | lrouter == rport.lrouter and
+                                  match(r.ip_prefix) {
+                                      IP6Subnet{sn6} -> ip6Match(ip6.dst, sn6),
+                                      _ -> false
+                                  }) {
+                    dec_ttl();
+                    pkt.src = r.outportmac;
+                    SomeRoute{r}
+                } default { NoRoute }
+            },
+            _ -> NoRoute
+        }
+    }
+}
+
+procedure resolve(rport : LogicalRouterPort, chassis : chassis_id_t, route: Route) : () = {
+    // TODO: check statically known addresses first
+    the (addr in LearnedAddresses | addr.rport == rport.id and addr.ip == route.nexthop) {
+        pkt.dst = addr.mac
+    } default {
+        pkt.dst = 0 // address unknown
+    }
+}
+
+procedure rportEgress(chassis : chassis_id_t, rport : lrouter_port_id_t) : sink = {
+    undnat(rport, chassis);
+    snat(rport, chassis);
+    if () {
+        recirculate();
+    } else {
+    }
+}
+
+/* Egress Table 0: UNDNAT
+
+    This is for already established connections’ reverse traffic. i.e., DNAT has already been done in ingress pipeline and now the packet has entered  the  egress pipeline  as  part of a reply. For NAT on a distributed router, it is unDNATted here. For Gateway routers, the unDNAT processing is carried out in the ingress DNAT table.
+
+    · For each configuration in the OVN Northbound database that asks to change the destination IP address of a packet from an IP address of A to B, a priority-100 flow matches ip && ip4.src == B && outport == GW, where GW is the logical router gateway port, with an action ct_dnat;.
+      If the NAT rule cannot be handled in a distributed manner, then the priority-100 flow above is only programmed on the redirect-chassis.
+                     If the NAT rule can be handled in a distributed manner, then there is an additional action eth.src = EA;, where EA is the ethernet address associated with the IP address A in the NAT rule. This allows upstream MAC learning to point to the correct chassis.
+    · A priority-0 logical flow with match 1 has actions next;.
+*/
+procedure undnat(rport : lrouter_port_id_t, chassis : chassis_id_t) : () = {
+    match (pkt.payload, rport.ptype) {
+        (EthIP4{ip4}, LRPGateway{rchassis}) -> {
+            the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == DNAT or nat.ntype == DNAT_SNAT) and ip4.src == nat.logical_ip) {
+                match (nat.external_mac) {
+                    NoMACAddr -> {
+                        if (chassis == rchassis) {
+                            ct_dnat();
+                        }
+                    },
+                    SomeMACAddr{mac} -> {
+                        ct_dnat();
+                        pkt.src = mac
+                    }
+                }
+            } default { () }
+        },
+        _ -> ()
+    }
+};
+
+/* Egress Table 1: SNAT
+   Packets that are configured to be SNATed get their source IP address changed based on the configuration in the OVN Northbound database.
+
+   · For each configuration in the OVN Northbound database, that asks to change the source IP address of a packet from an  IP  address  of  A  or  to change  the  source  IP  address of a packet that belongs to network A to B, a flow matches ip && ip4.src == A && outport == GW, where GW is the logical router gateway port, with an action ct_snat(B);. The priority of the flow is calculated based on the mask  of  A,  with  matches  having larger masks getting higher priorities.
+                     If the NAT rule cannot be handled in a distributed manner, then the flow above is only programmed on the redirect-chassis.
+                     If the NAT rule can be handled in a distributed manner, then there is an additional action eth.src = EA;, where EA is the ethernet address associated with the IP address A in the NAT rule. This allows upstream MAC learning to point to the correct chassis.
+   · A priority-0 logical flow with match 1 has actions next;.
+*/
+procedure snat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
+    match (pkt.payload, rport.ptype) {
+        (EthIP4{ip4}, LRPGateway{rchassis}) -> {
+            the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == SNAT or nat.ntype == DNAT_SNAT) and ip4.src == nat.logical_ip) {
+                match (nat.external_mac) {
+                    NoMACAddr -> {
+                        if (chassis == rchassis) {
+                            ct_snat(nat.external_ip)
+                        }
+                    },
+                    SomeMACAddr{mac} -> {
+                        ct_snat(nat.external_ip);
+                        pkt.src = mac
+                    }
+                }
+            } default { () }
+        },
+        _ -> ()
+}
+
+/* Egress Table 2: Egress Loopback
+
+    For distributed logical routers where one of the logical router ports specifies a redirect-chassis.
+
+    Earlier in the ingress pipeline, some east-west traffic was redirected to the chassisredirect port, based on flows in the UNSNAT and DNAT ingress tables  setting  the REGBIT_NAT_REDIRECT flag, which then triggered a match to a flow in the Gateway Redirect ingress table. The intention was not to actually send traffic out the distributed gateway port instance on the redirect-chassis. This traffic was sent to the distributed gateway port instance in order for DNAT and/or SNAT processing to be applied.
+
+    While UNDNAT and SNAT processing have already occurred by this point, this traffic needs to be forced through egress loopback on this distributed gateway port instance, in order for UNSNAT and DNAT processing to be applied, and also for IP routing and ARP resolution after all of  the  NAT  processing, so that the packet can be forwarded to the destination.
+
+    This table has the following flows:
+    · For  each NAT rule in the OVN Northbound database on a distributed router, a priority-100 logical flow with match ip4.dst == E && outport == GW, where E is the external IP address specified in the NAT rule, and GW is the logical router distributed gateway port, with the following actions:
+     clone {
+         ct_clear;
+         inport = outport;
+         outport = "";
+         flags = 0;
+         flags.loopback = 1;
+         reg0 = 0;
+         reg1 = 0;
+         ...
+         reg9 = 0;
+         REGBIT_EGRESS_LOOPBACK = 1;
+         next(pipeline=ingress, table=0);
+     };
+
+     flags.loopback is set since in_port is unchanged and the packet may return back to that port after NAT processing. REGBIT_EGRESS_LOOPBACK is set to indicate that egress loopback has occurred, in order to skip the source IP address check against the router address.
+*/
+
+#controller
+procedure ctlMkNA(rport : lrouter_port_id_t, srcip : ip6_addr_t, srcmac : mac_addr_t, rportip : ip6_addr_t, rportmac : mac_addr_t) : () = {
+    putND(rport, srcip, srcmac);
+    pkt.src = rportmac;
+    pkt.payload.ip6.src = rportip;
+    pkt.payload.ip6.icmp6 = ICMP6Pkt{136, 0, ICMP6NA{ICMP6NAPkt{rportip, rportmac}}}
+}
+
+#controller
+procedure ctlPutND(rport : lrouter_port_id_t, ip : ip6_addr_t, mac) : sink = {
+    putND(rport, srcip, srcmac);
+    drop
+}
+
+procedure mkARPResp(mac : mac_addr_t, ip : ip4_addr_t): () = {
+    pkt.dst = pkt.src;
+    pkt.src = mac;
+    pkt.payload.arp.op = ARPReply;
+    pkt.payload.arp.tha = pkt.payload.arp.sha;
+    pkt.payload.arp.sha = mac;
+    pkt.payload.arp.tpa = pkt.payload.arp.spa;
+    pkt.payload.arp.spa = ip;
 }

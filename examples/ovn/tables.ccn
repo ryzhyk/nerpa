@@ -6,6 +6,10 @@ typedef opt_subnet_t = SomeSubnet { subnet : ip_subnet_t }
 typedef opt_ip_addr_t = SomeIPAddr { addr : ip_addr_t }
                       | NoIPAddr
 
+typedef opt_mac_addr_t = SomeMACAddr { addr : mac_addr_t }
+                       | NoMACAddr
+
+
 typedef lswitch_type_t = LSwitchRegular
                        | LSwitchBridged
 
@@ -83,6 +87,13 @@ function isFloatingPort(ptype : lport_type_t) : bool = {
 
 // logical switch id
 typedef lswitch_id_t = bit<64>
+
+// logical port id
+typedef lport_id_t = bit<64>
+
+typedef opt_lport_id_t = SomeLPortId{id: lport_id_t}
+                       | NoLPortId
+
 
 table LogicalSwitch( id           : lswitch_id_t
                    , stype        : lswitch_type_t
@@ -192,8 +203,6 @@ typedef opt_dhcp6_options_id_t = NoDHCP6Options
                                | SomeDHCP6Options { options : dhcp6_options_id_t }
 
 
-// logical port id
-typedef lport_id_t = bit<64>
 typedef ct_zone_t = bit<16>
 
 table LogicalSwitchPort( id            : lport_id_t
@@ -533,29 +542,22 @@ table LBRouter ( lb      : lb_id_t
        name: string (must be unique within table)
               A name for the logical router port.
 
-              In addition to provide convenience for human interaction with the ovn-nb database, this column is used  as  reference  by  its  patch  port  in  Logi‐
-              cal_Switch_Port or another logical router port in Logical_Router_Port.
+              In addition to provide convenience for human interaction with the ovn-nb database, this column is used  as  reference  by  its  patch  port  in  Logical_Switch_Port or another logical router port in Logical_Router_Port.
 
        networks: set of 1 or more strings
-              The  IP addresses and netmasks of the router.  For example, 192.168.0.1/24 indicates that the router’s IP address is 192.168.0.1 and that packets des‐
-              tined to 192.168.0.x should be routed to this port.
-
-              A logical router port always adds a link-local IPv6 address (fe80::/64) automatically generated from the interface’s MAC address  using  the  modified
-              EUI-64 format.
+              The  IP addresses and netmasks of the router.  For example, 192.168.0.1/24 indicates that the router’s IP address is 192.168.0.1 and that packets destined to 192.168.0.x should be routed to this port.
+              A logical router port always adds a link-local IPv6 address (fe80::/64) automatically generated from the interface’s MAC address  using  the  modified EUI-64 format.
 
        mac: string
               The Ethernet address that belongs to this router port.
 
        enabled: optional boolean
-              This  column  is  used  to administratively set port state.  If this column is empty or is set to true, the port is enabled.  If this column is set to
-              false, the port is disabled.  A disabled port has all ingress and egress traffic dropped.
+              This  column  is  used  to administratively set port state.  If this column is empty or is set to true, the port is enabled.  If this column is set to false, the port is disabled.  A disabled port has all ingress and egress traffic dropped.
 
      Attachment:
        A given router port serves one of two purposes:
-              ·      To attach a logical switch to a logical router.  A logical router port of this type is referenced by exactly one  Logical_Switch_Port  of  type
-                     router.  The value of name is set as router-port in column options of Logical_Switch_Port.  In this case peer column is empty.
-              ·      To  connect  one  logical  router to another.  This requires a pair of logical router ports, each connected to a different router.  Each router
-                     port in the pair specifies the other in its peer column.  No Logical_Switch refers to the router port.
+              ·      To attach a logical switch to a logical router.  A logical router port of this type is referenced by exactly one  Logical_Switch_Port  of  type router.  The value of name is set as router-port in column options of Logical_Switch_Port.  In this case peer column is empty.
+              ·      To  connect  one  logical  router to another.  This requires a pair of logical router ports, each connected to a different router.  Each router port in the pair specifies the other in its peer column.  No Logical_Switch refers to the router port.
 
        peer: optional string
               For a router port used to connect two logical routers, this identifies the other router port in the pair by name.
@@ -567,12 +569,16 @@ table LBRouter ( lb      : lb_id_t
 
 typedef lrouter_port_id_t = bit<64>
 
+typedef lrouter_port_type_t = LRPRegular
+                            | LRPGateway { redirectChassis : chassis_id_t }
+
 typedef opt_peer_t = NoPeer
                    | SomePeer { peer : lrouter_port_id_t }
 
 table LogicalRouterPort ( id      : lrouter_port_id_t
                         , name    : string
                         , lrouter : lrouter_id_t
+                        , ptype   : lrouter_port_type_t
                         , mac     : mac_addr_t
                         , enabled : bool
                         , peer    : opt_peer_t
@@ -609,8 +615,8 @@ table LRouterPortNetwork ( lport   : lrouter_port_id_t
 table LogicalRouterStaticRoute ( lrouter     : lrouter_id_t
                                , ip_prefix   : ip_subnet_t
                                , nexthop     : ip_addr_t
-                               , output_port : opt_peer_t
-                               , foreign key (output_port.peer) references LogicalRouter(id) )
+                               , outport     : lrouter_port_id_t
+                               , foreign key (outport) references LogicalRouterPort(id) )
 
 /* NAT TABLE
        Each record represents a NAT rule in a Gateway router.
@@ -625,12 +631,8 @@ table LogicalRouterStaticRoute ( lrouter     : lrouter_id_t
               Type of the NAT rule.
 
               ·      When type is dnat, the externally visible IP address external_ip is DNATted to the IP address logical_ip in the logical space.
-
-              ·      When  type  is  snat, IP packets with their source IP address that either matches the IP address in logical_ip or is in the network provided by
-                     logical_ip is SNATed into the IP address in external_ip.
-
-              ·      When type is dnat_and_snat, the externally visible IP address external_ip is DNATted to the IP address logical_ip  in  the  logical  space.  In
-                     addition, IP packets with the source IP address that matches logical_ip is SNATed into the IP address in external_ip.
+              ·      When  type  is  snat, IP packets with their source IP address that either matches the IP address in logical_ip or is in the network provided by logical_ip is SNATed into the IP address in external_ip.
+              ·      When type is dnat_and_snat, the externally visible IP address external_ip is DNATted to the IP address logical_ip  in  the  logical  space.  In addition, IP packets with the source IP address that matches logical_ip is SNATed into the IP address in external_ip.
 
        external_ip: string
               An IPv4 address.
@@ -642,11 +644,20 @@ typedef nat_type_t = SNAT
                    | DNAT
                    | DNAT_SNAT
 
-table NAT ( lrouter     : lrouter_id_t
-          , ntype       : nat_type_t
-          , external_ip : ip4_addr_t
-          , logical_ip  : ip4_subnet_t
-          , foreign key (lrouter) references LogicalRouter(id) )
+table NAT ( lrouter      : lrouter_id_t
+          , ntype        : nat_type_t
+          , external_ip  : ip4_addr_t
+          , external_mac : opt_mac_addr_t
+          , logical_ip   : ip4_subnet_t
+          , logical_port : opt_lport_id_t
+          , foreign key (lrouter) references LogicalRouter(id) 
+          , foreign key (logical_port.lport) references LogicalSwitchPort(id))
+
+// MAC addresses learned by the router
+state table LearnedAddresses ( rport : lrouter_port_id_t
+                             , ip    : ip_addr_t
+                             , mac   : mac_addr_t
+                             , foreign key rport references LogicalRouterPort(id) )
 
 /* DHCP_Options TABLE
        OVN implements native DHCPv4 support which caters to the common use case of providing an IPv4 address to a booting instance by providing stateless replies to
@@ -869,5 +880,4 @@ table TunnelPort( id         : tunport_id_t
                 , foreign key (switch) references Chassis(id)
                 , unique (switch)
                 , unique (switch, portnum) )
-
 

@@ -235,3 +235,49 @@ view TunnelFromTo( fromChassis: chassis_id_t
                  , toip       : ip4_addr_t )
 
 TunnelFromTo(from, to, toip) :- TunnelPort(_, _, to, toip), Chassis(from, _, _, _), from != to
+
+/* Routers */
+
+view LRouterNetwork ( lrouter : lrouter_id_t
+                    , network : ip_subnet_t)
+
+LRouterNetwork(lrouter, network) :- LogicalRouterPort(lrport, _, lrouter, _, _ ,_ ,_), 
+                                    LRouterPortNetwork(lrport, network)
+
+view LRouterVIP ( lrouter : lrouter_id_t
+                , vip     : ip4_addr_t)
+
+LRouterLBVIP(lrouter, vip) :- LBRouter(lb, lrouter), LBVIP(lb, IP4AddrPort{vip, _})
+
+/* NAT */
+
+// for NAT rules bound to a chassis
+view NATChassis ( lrouter      : lrouter_id_t
+                , ntype        : nat_type_t
+                , external_ip  : ip4_addr_t
+                , external_mac : mac_addr_t
+                , logical_ip   : ip4_subnet_t
+                , logical_port : lport_id_t
+                , chassis      : chassis_id_t)
+
+NATChassis(lrouter, ntype, external_ip, external_mac, logical_ip, logical_port, chassis) :-
+    NAT(lrouter, ntype, external_ip, SomeMACAddr{external_mac}, logical_ip, SomeLPortId{logical_port}),
+    LPortAtChassis(logical_port, _, chassis, f), not f
+
+/* Routes */
+table Route ( lrouter     : lrouter_id_t
+            , ip_prefix   : ip_subnet_t
+            , nexthop     : ip_addr_t
+            , outport     : lrouter_port_id_t
+            , outportmac  : mac_addr_t
+            , outportip   : ip_addr_t)
+
+Route(lrouter, ip_prefix, nexthop, outport, outportmac, IPAddr4{outportip}) :- 
+    LogicalRouterStaticRoute (lrouter, ip_prefix, nexthop, outport),
+    LogicalRouterPort(outport, _, _, _, outportmac, _, _),
+    LRouterPortNetwork(outport, IP4Subnet{outportip, _})
+
+Route(lrouter, ip_prefix, nexthop, outport, outportmac, IPAddr6{outportip}) :- 
+    LogicalRouterStaticRoute (lrouter, ip_prefix, nexthop, outport),
+    LogicalRouterPort(outport, _, _, _, outportmac, _, _),
+    LRouterPortNetwork(outport, IP6Subnet{outportip, _})
