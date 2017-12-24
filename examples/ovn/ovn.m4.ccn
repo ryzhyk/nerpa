@@ -30,7 +30,7 @@ procedure vSwitchIngress(port: VSwitchPort): sink = {
 
 
 // XXX: TODO: QoS marking
-procedure lportIngress(vport: VSwitchPort, lport: LogicalSwitchPort): sink = {
+procedure lportIngress(lport: LogicalSwitchPort, chassis : chassis_id_t): sink = {
     if (not ingressPortSecurity(lport, pkt)) drop;
 
     /* Run through connection tracker if needed */
@@ -45,12 +45,12 @@ procedure lportIngress(vport: VSwitchPort, lport: LogicalSwitchPort): sink = {
 
     /* ARP/ND */
     var arpresp = arp(lport);
-    if (arpresp) { bounce(vport, lport) };
+    if (arpresp) { bounce(lport, chassis) };
 
     /* DHCP/DNS */
     match (pkt.payload) {
-        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}} -> if (src == 68 and dst == 67)   { dhcp4(lport.id) } else { () },
-        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}}       -> if (src == 546 and dst == 547) { dhcp6(lport.id) } else { () },
+        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}} -> if (src == 68 and dst == 67)   { dhcp4(lport.id, chassis) } else { () },
+        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{src, dst, _, _}}}}       -> if (src == 546 and dst == 547) { dhcp6(lport.id, chassis) } else { () },
         _   -> ()
     };
 
@@ -59,7 +59,7 @@ procedure lportIngress(vport: VSwitchPort, lport: LogicalSwitchPort): sink = {
     };
 
     /* destination lookup */
-    dstLookup(vport, lport)
+    dstLookup(lport, chassis)
 }
 
 function ingressPortSecurity(lport: LogicalSwitchPort, p: Packet): bool = {
@@ -418,7 +418,7 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
 */
 
 #controller
-procedure dhcp4(lport : lport_id_t) : sink = {
+procedure dhcp4(lport : lport_id_t, chassis : chassis_id_t) : sink = {
     the (dhcp_addr_opts in LPortDHCP4AddrOpts | dhcp_addr_opts.lport == lport) {
         pkt.dst = pkt.src;
         pkt.src = dhcp_addr_opts.options.server_mac;
@@ -430,12 +430,12 @@ procedure dhcp4(lport : lport_id_t) : sink = {
                                                                  pkt.payload.ip4.payload.udp.payload.dhcp4.flags,
                                                                  0, dhcp_addr_opts.ip, dhcp_addr_opts.options.server_id, 0, 
                                                                  pkt.dst ++ 80'h0, dhcp_addr_opts.options} };
-        ctlBounce(lport)
+        bounce(lport, chassis)
     } default { drop }
 }
 
 #controller
-procedure dhcp6(lport : lport_id_t) : sink = {
+procedure dhcp6(lport : lport_id_t, chassis : chassis_id_t) : sink = {
     the (dhcp_addr_opts in LPortDHCP6AddrOpts | dhcp_addr_opts.lport == lport) {
         pkt.dst = pkt.src;
         pkt.src = dhcp_addr_opts.options.server_id.mac;
@@ -448,7 +448,7 @@ procedure dhcp6(lport : lport_id_t) : sink = {
              (pkt.payload.ip4.payload.udp.payload.dhcp6.op == 4/*CONFIRM*/) or 
              (pkt.payload.ip4.payload.udp.payload.dhcp6.op == 5/*RENEW*/) ) {
             pkt.payload.ip4.payload.udp.payload = UDPDHCP6{DHCP6Pkt{7/*REPLY*/, dhcp_addr_opts.options} };
-            ctlBounce(lport)
+            bounce(lport, chassis)
         } else { drop }
     } default { drop }
 }
@@ -461,28 +461,11 @@ procedure dns(lport : lport_id_t) : sink = {
 
 
 // bounce the  packet back to the port is arrived from after local ARP or DHCP processing
-procedure bounce(vport: VSwitchPort, lport : LogicalSwitchPort): sink = {
-    match (lport.ptype) {
-        LPortVIF { par, _, tag } -> pkt.vlan = VLAN{0, tag},
-        _                        -> ()
-    };
+procedure bounce(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
     pkt.portnum = 0;
-    send PVSwitchPort[vport].out
+    deliver(lport, chassis);
 }
 
-
-procedure ctlBounce(lport : lport_id_t): sink = {
-    the (lp in LogicalSwitchPort | lp.id == lport) {
-        var b: LPortBinding;
-        b = match (lp.ptype) {
-                LPortVIF{p,_,_} -> the (lb in LPortBinding | lb.lport == p) { lb },
-                _               -> the (lb in LPortBinding | b.lport == lport) { lb }
-        };
-        the (vp in VSwitchPort | vp.id == b.vport) {
-            bounce(vp, lp)
-        }
-    } default { drop }
-}
 
 /* Ingress Table 15 Destination Lookup
     This table implements switching behavior. It contains these logical flows:
@@ -588,9 +571,7 @@ procedure lportEgress(lport: LogicalSwitchPort, chassis : chassis_id_t): sink = 
 
 procedure deliver(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
     match (lport.ptype) {
-        LPortRouter{rpid}   -> the (rport in LogicalRouterPort | rport.id == rpid} ){
-                                   lrouterIngress(rport, chassis)
-                               } default { drop }, 
+        LPortRouter{rpid}   -> lrouterIngress(rpid, chassis, false), 
         _ -> ()
     };
 
@@ -676,18 +657,19 @@ procedure tunIngress(port: TunnelPort): sink = {
     if (pkt.vlan.tun_id[23:23] == 0) {
         vSwitchEgress(false, port.switch, pkt.vxlan.tun_id)
     } else {
-        rportEgress(port.switch, pkt.vxlan.tun_id)
+        rportEgress(port.switch, pkt.vxlan.tun_id, true)
     }
 }
 
-procedure lrouterIngress(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
+procedure lrouterIngress(rpid : lrouter_port_id_t, chassis : chassis_id_t, egress_loopback : bool) : sink = {
+    var rport = the (rp in LogicalRouterPort | rp.id == rpid);
     if (not rport.enabled) { drop };
 
     // L2 admission control
     if (not l2AdmissionControl(rport, chassis)) { drop };
 
     // L3 admission control
-    if (not l3AdmissionControl(rport)) { drop };
+    if (not l3AdmissionControl(rport, egress_loopback)) { drop };
 
     // ARP request and response processing
     if (rportARPReq(rport, chassis)) {
@@ -721,7 +703,7 @@ procedure l2AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t) 
 }
 
 
-procedure l3AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
+procedure l3AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t, egress_loopback : bool) : bool = {
     srcip = pktSrcIPAddr(pkt);
     match (pkt.payload) {
         EthIP4{ip4} -> {
@@ -742,8 +724,8 @@ procedure l3AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t) 
         _ -> true
     } and {
         the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and SomeIPAddr{ipSubnetAddr(lrn.network)} == srcip) {
-            // XXX: unless REG_BIT_EGRESS_LOOPBACK
-            false
+            // unless REG_BIT_EGRESS_LOOPBACK
+            egress_loopback
         } default { true }
     }
 }
@@ -936,7 +918,7 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
         }
     };
 
-    rportEgress(chassis, rt.outport)
+    rportEgress(chassis, rt.outport, false)
 }
 
 procedure unsnat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
@@ -1018,12 +1000,48 @@ procedure resolve(rport : LogicalRouterPort, chassis : chassis_id_t, route: Rout
     }
 }
 
-procedure rportEgress(chassis : chassis_id_t, rport : lrouter_port_id_t) : sink = {
+procedure rportEgress(chassis : chassis_id_t, rpid : lrouter_port_id_t, redirected : bool) : sink = {
+    var rport = the (rp in LogicalRouterPort | rp.id == rpid) { rp };
     undnat(rport, chassis);
     snat(rport, chassis);
-    if () {
-        recirculate();
-    } else {
+
+    /* Egress Table 2: Egress Loopback
+
+        For distributed logical routers where one of the logical router ports specifies a redirect-chassis.
+
+        Earlier in the ingress pipeline, some east-west traffic was redirected to the chassisredirect port, based on flows in the UNSNAT and DNAT ingress tables  setting  the REGBIT_NAT_REDIRECT flag, which then triggered a match to a flow in the Gateway Redirect ingress table. The intention was not to actually send traffic out the distributed gateway port instance on the redirect-chassis. This traffic was sent to the distributed gateway port instance in order for DNAT and/or SNAT processing to be applied.
+
+        While UNDNAT and SNAT processing have already occurred by this point, this traffic needs to be forced through egress loopback on this distributed gateway port instance, in order for UNSNAT and DNAT processing to be applied, and also for IP routing and ARP resolution after all of  the  NAT  processing, so that the packet can be forwarded to the destination.
+
+        This table has the following flows:
+        · For  each NAT rule in the OVN Northbound database on a distributed router, a priority-100 logical flow with match ip4.dst == E && outport == GW, where E is the external IP address specified in the NAT rule, and GW is the logical router distributed gateway port, with the following actions:
+         clone {
+             ct_clear;
+             inport = outport;
+             outport = "";
+             flags = 0;
+             flags.loopback = 1;
+             reg0 = 0;
+             reg1 = 0;
+             ...
+             reg9 = 0;
+             REGBIT_EGRESS_LOOPBACK = 1;
+             next(pipeline=ingress, table=0);
+         };
+
+         flags.loopback is set since in_port is unchanged and the packet may return back to that port after NAT processing. REGBIT_EGRESS_LOOPBACK is set to indicate that egress loopback has occurred, in order to skip the source IP address check against the router address.
+    */
+    if (redirected) {
+        lrouterIngress(rport.id, chassis, true)
+    };
+    match (rport.peer) {
+        NoPeer         -> the (lport in LogicalSwitchPort | match (lport.ptype) {
+                                                               LPortRouter{rpid2} -> rpid2 == rport.id,
+                                                               _ -> false 
+                                                            }) {
+                              lportIngress(lport, chassis)
+                          } default { drop },
+        SomePeer(peer) -> lrouterIngress(peer, chassis, false)
     }
 }
 
@@ -1084,33 +1102,6 @@ procedure snat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
         },
         _ -> ()
 }
-
-/* Egress Table 2: Egress Loopback
-
-    For distributed logical routers where one of the logical router ports specifies a redirect-chassis.
-
-    Earlier in the ingress pipeline, some east-west traffic was redirected to the chassisredirect port, based on flows in the UNSNAT and DNAT ingress tables  setting  the REGBIT_NAT_REDIRECT flag, which then triggered a match to a flow in the Gateway Redirect ingress table. The intention was not to actually send traffic out the distributed gateway port instance on the redirect-chassis. This traffic was sent to the distributed gateway port instance in order for DNAT and/or SNAT processing to be applied.
-
-    While UNDNAT and SNAT processing have already occurred by this point, this traffic needs to be forced through egress loopback on this distributed gateway port instance, in order for UNSNAT and DNAT processing to be applied, and also for IP routing and ARP resolution after all of  the  NAT  processing, so that the packet can be forwarded to the destination.
-
-    This table has the following flows:
-    · For  each NAT rule in the OVN Northbound database on a distributed router, a priority-100 logical flow with match ip4.dst == E && outport == GW, where E is the external IP address specified in the NAT rule, and GW is the logical router distributed gateway port, with the following actions:
-     clone {
-         ct_clear;
-         inport = outport;
-         outport = "";
-         flags = 0;
-         flags.loopback = 1;
-         reg0 = 0;
-         reg1 = 0;
-         ...
-         reg9 = 0;
-         REGBIT_EGRESS_LOOPBACK = 1;
-         next(pipeline=ingress, table=0);
-     };
-
-     flags.loopback is set since in_port is unchanged and the packet may return back to that port after NAT processing. REGBIT_EGRESS_LOOPBACK is set to indicate that egress loopback has occurred, in order to skip the source IP address check against the router address.
-*/
 
 #controller
 procedure ctlMkNA(rport : lrouter_port_id_t, srcip : ip6_addr_t, srcmac : mac_addr_t, rportip : ip6_addr_t, rportmac : mac_addr_t) : () = {
