@@ -468,6 +468,7 @@ mkExpr p     (EBinOp op e1 e2)    =
          Concat -> error "not implemented: Dataflog.mkExpr Concat"
     where f o = parens $ mkExpr p e1 <+> o <+> mkExpr p e2
 mkExpr p     (EUnOp Not e)        = parens $ "!" <> mkExpr p e
+mkExpr p     (EUnOp BNeg e)       = parens $ "!" <> mkExpr p e
 mkExpr p     (ESlice e h l)       = let e' = mkExpr p e
                                         e1 = if' (l == 0) e' (parens $ e' <+> ">>" <+> pp l)
                                         mask = foldl' setBit 0 [0..(h-l)]

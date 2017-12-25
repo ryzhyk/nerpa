@@ -39,7 +39,7 @@ import Util
 import {-# SOURCE #-}Builtins
 import Name
 
-reservedOpNames = [":", "?", "!", "|", "&", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#", "@", "\\"]
+reservedOpNames = [":", "?", "!", "|", "&", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#", "@", "\\", "~"]
 reservedNames = ["_",
                  "and",
                  "any",
@@ -467,6 +467,7 @@ mkLit (Just w) v | w == 0              = fail "Unsigned literals must have width
                  | otherwise           = fail "Value exceeds specified width"
 
 etable = [[postf $ choice [postSlice, postApply, postBuiltin, postField, postType]]
+         ,[pref  $ choice [prefix "~" BNeg]]
          ,[pref  $ choice [prefix "not" Not]]
          ,[binary "%" Mod AssocLeft]
          ,[binary "+" Plus AssocLeft,
@@ -557,6 +558,7 @@ rterm  = withPos $
      <|> evar
 
 retable = [[postf $ choice [postSlice, postType]]
+         ,[pref  $ choice [prefix "~" BNeg]]
          ,[pref  $ choice [prefix "not" Not]]
          ,[binary "%" Mod AssocLeft]
          ,[binary "+" Plus AssocLeft,

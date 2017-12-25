@@ -197,6 +197,10 @@ evalExpr'' ctx e = do
                              return $ Left $ case a' of
                                                   EBool _ v -> meBool $ not v
                                                   _         -> meNot $ expr2MExpr $ E a'
+        EUnOp  _ BNeg a -> do Left (E a') <- evalExprS (CtxUnOp e ctx) a
+                              return $ Left $ case a' of
+                                                   EBit _ w v -> meBit w $ complement v
+                                                   _          -> meUnOp BNeg $ expr2MExpr $ E a'
         EFor _ v t c b -> do rows <- lift $ (liftM $ map fact2Row) $ DL.enumRelation ?dl t
                              mapM_ (\row -> do kmap <- eget
                                                emodify $ M.insert v $ expr2MExpr row

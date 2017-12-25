@@ -154,6 +154,7 @@ smtppBOp q mf op e =
 
 instance SMTPP UOp where
     smtpp _ Not   = "not"
+    smtpp _ BNeg  = "bvnot"
 
 instance SMTPP Function where
     smtpp q f@Function{..} = parens $   "define-fun" <+> ppFName funcName 

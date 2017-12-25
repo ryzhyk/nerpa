@@ -127,6 +127,7 @@ exprType (EBinOp op e1 e2) = case op of
                                  BOr        -> exprType e1
                                  Concat     -> TBit $ (typeWidth $ exprType e1) + (typeWidth $ exprType e2)
 exprType (EUnOp Not _)     = TBool
+exprType (EUnOp BNeg e)    = exprType e
 exprType (ELambda _ t)     = t
 
 exprIsBool :: Expr -> Bool
@@ -266,6 +267,9 @@ exprEval   (EBinOp op e1 e2)       = case op of
 exprEval   (EUnOp Not e)       = case exprEval e of
                                       EBool b -> EBool $ not b
                                       e'      -> EUnOp Not e'
+exprEval   (EUnOp BNeg e)      = case exprEval e of
+                                      EBit w v -> EBit w $ complement v
+                                      e'       -> EUnOp BNeg e'
 exprEval   (ELambda as t)      = ELambda (map exprEval as) t
 
 cfgSubstVar :: VarName -> Expr -> CFG -> CFG

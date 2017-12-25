@@ -27,7 +27,7 @@ typedef ip_subnet_t = IPSubnet4 {ip4_subnet : ip4_subnet_t}
 function ipSubnetAddr(subnet : ip_subnet_t) : ip_addr_t = 
     match (subnet) {
         IPSubnet4{subnet4} -> IPAddr4{subnet4.addr},
-        IPSubnet6{subnet6} -> IPAddr6{subnet6.addr},
+        IPSubnet6{subnet6} -> IPAddr6{subnet6.addr}
     }
 
 function ip4Match(addr: ip4_addr_t, subnet: ip4_subnet_t): bool =

@@ -509,6 +509,7 @@ exprValidate1 r ctx (ESet _ l _)        = checkLExpr r ctx l
 exprValidate1 r ctx (ESend p _)         = ctxCheckSideEffects p r ctx
 exprValidate1 _ _   (EBinOp _ _ _ _)    = return ()
 exprValidate1 _ _   (EUnOp _ Not _)     = return ()
+exprValidate1 _ _   (EUnOp _ BNeg _)    = return ()
 exprValidate1 r ctx (EFork p v t _ _)   = do ctxCheckSideEffects p r ctx
                                              _ <- checkRelation p r ctx t
                                              _ <- checkNoVar p r ctx v
@@ -594,6 +595,7 @@ exprValidate2 r _   (EBinOp p op e1 e2) = do case op of
           isbit1 = assertR r (isBit r e1) (pos e1) $ "Not a bit vector"
           isbit2 = assertR r (isBit r e2) (pos e2) $ "Not a bit vector"
           isbool = assertR r (isBool r e1) (pos e1) $ "Not a Boolean"
+exprValidate2 r _   (EUnOp _ BNeg e)    = assertR r (isBit r e) (pos e) "Not a bit vector"
 exprValidate2 r ctx (EVarDecl p x)      = assertR r (isJust $ ctxExpectType r ctx) p $ "Cannot determine type of variable " ++ x -- Context: " ++ show ctx
 exprValidate2 r _  (EITE _ _ t e)       = let e' = maybe (tTuple []) id e
                                               cs' = filter ((/= tSink) . typ' r) [e', t] in

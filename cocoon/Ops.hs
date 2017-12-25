@@ -67,10 +67,12 @@ instance Show BOp where
     show = render . pp
 
 data UOp = Not
-           deriving (Eq, Ord)
+         | BNeg
+         deriving (Eq, Ord)
 
 instance PP UOp where
-    pp Not = "not"
+    pp Not  = "not"
+    pp BNeg = "~"
 
 instance Show UOp where
     show = render . pp

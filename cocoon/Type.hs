@@ -129,6 +129,8 @@ exprNodeType' _ _   (EBinOp _ ShiftR e1 _) = e1
 exprNodeType' _ _   (EBinOp _ ShiftL e1 _) = e1
 exprNodeType' _ _   (EBinOp _ _ _ _)       = Nothing
 exprNodeType' _ _   (EUnOp _ Not _)        = Just tBool
+exprNodeType' r _   (EUnOp _ BNeg (Just e))= Just $ typ' r e
+exprNodeType' _ _   (EUnOp _ _ _)          = Nothing
 exprNodeType' _ _   (EFork _ _ _ _ b)      = b
 exprNodeType' _ _   (EFor  _ _ _ _ _)      = Just $ tTuple []
 exprNodeType' _ _   (EWith _ _ _ _ b _)    = b
@@ -366,6 +368,7 @@ ctxExpectType r (CtxBinOpR e ctx)                    = case exprBOp e of
                                                             Concat -> Nothing
     where tlhs = exprTypeMaybe r ctx $ exprLeft e
 ctxExpectType _ (CtxUnOp (EUnOp _ Not _) _)          = Just tBool
+ctxExpectType r (CtxUnOp (EUnOp _ BNeg _) ctx)       = ctxExpectType r ctx
 ctxExpectType _ (CtxForkCond _ _)                    = Just tBool
 ctxExpectType r (CtxForkBody _ ctx)                  = ctxExpectType r ctx
 ctxExpectType _ (CtxForCond _ _)                     = Just tBool
