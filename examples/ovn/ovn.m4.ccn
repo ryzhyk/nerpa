@@ -463,7 +463,7 @@ procedure dns(lport : lport_id_t) : sink = {
 // bounce the  packet back to the port is arrived from after local ARP or DHCP processing
 procedure bounce(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
     pkt.portnum = 0;
-    deliver(lport, chassis);
+    deliver(lport, chassis)
 }
 
 
@@ -662,7 +662,7 @@ procedure tunIngress(port: TunnelPort): sink = {
 }
 
 procedure lrouterIngress(rpid : lrouter_port_id_t, chassis : chassis_id_t, egress_loopback : bool) : sink = {
-    var rport = the (rp in LogicalRouterPort | rp.id == rpid);
+    var rport = the (rp in LogicalRouterPort | rp.id == rpid) { rp };
     if (not rport.enabled) { drop };
 
     // L2 admission control
@@ -683,7 +683,7 @@ procedure lrouterIngress(rpid : lrouter_port_id_t, chassis : chassis_id_t, egres
     };
 
     // process IP packets for IP addresses owned by the router
-    rportIP(rport, chassis))
+    rportIP(rport, chassis)
 }
 
 procedure l2AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
@@ -698,6 +698,7 @@ procedure l2AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t) 
         // XXX: Why does this rule only apply to DNAT_SNAT rules
         the (nat in NATChassis | isGatewayPort(rport) and nat.lrouter == rport.lrouter and nat.ntype == DNAT_SNAT and 
                                  nat.external_mac == SomeMACAddr{pkt.dst} and chassis = nat.chassis) {
+            true
         } default { false }
     }
 }
@@ -714,7 +715,7 @@ procedure l3AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t, 
             } else {
                 the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and 
                                              match (lrn.network) {
-                                                 IP4Subnet{addr, mask} -> ip4.src == (addr | ~mask)
+                                                 IP4Subnet{addr, mask} -> ip4.src == (addr | ~mask),
                                                  _                     -> false
                                              }) {
                     false
@@ -734,7 +735,7 @@ procedure l3AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t, 
 // Returns true iff the packet must be bounced back to the sender
 procedure rportARPReq(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
     match (pkt.payload) {
-        EthARP{ARPPkt{ARPRequest, spa, tpa, sha, tha}}) -> {
+        EthARP{ARPPkt{ARPRequest, spa, tpa, sha, tha}} -> {
             the (lrn in LRouterPortNetwork | lrn.lport == rport.id and 
                                              (rport.ptype == LRPRegular or rport.ptype == LRPGateway{chassis}) and
                                              match (lrn.network) {
@@ -752,7 +753,7 @@ procedure rportARPReq(rport : LogicalRouterPort, chassis : chassis_id_t) : bool 
                                       nat.external_ip == tpa and 
                                          (rport.ptype == LRPRegular or
                                           match (nat.external_mac) {
-                                              NoMACAddr -> rport.ptype == LRPGateway{chassis} or 
+                                              NoMACAddr -> rport.ptype == LRPGateway{chassis},
                                               _         -> false
                                           })) {
                         mkARPResp(rport.mac, lrvip.vip);
@@ -788,7 +789,7 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
             the (lrn in LRouterPortNetwork | lrn.lport == rport.id and 
                                              (rport.ptype == LRPRegular or rport.ptype == LRPGateway{chassis}) and
                                              match (lrn.network) {
-                                                IPSubnet6{sn6} -> sn6.addr == target and dst == target
+                                                IPSubnet6{sn6} -> sn6.addr == target and dst == target,
                                                 _              -> false
                                              }) {
                 ctlMkNA(rport.id, src, sll, lrn.network.ip6_subnet.addr, rport.mac);
@@ -801,12 +802,12 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
         EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,dst,IPICMP4{ICMP4Pkt{type, code}}}} -> {
             the (lrn in LRouterNetwork | type == 8 and code == 0 and lrn.lrouter == rport.lrouter and 
                                          match (lrn.network) {
-                                            IPSubnet4{sn4} -> sn4.addr == dst
+                                            IPSubnet4{sn4} -> sn4.addr == dst,
                                             _              -> false
                                          }) {
                 pkt.payload.ip4.dst = pkt.payload.ip4.src;
                 pkt.payload.ip4.ttl = 255;
-                pkt.payload.ip4.icmp4.type = 0
+                pkt.payload.ip4.icmp4.type = 0;
                 handled = true
             } default { () }
         },
@@ -815,7 +816,7 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
             if (type == 128 and code == 0) {
                 the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and 
                                              match (lrn.network) {
-                                                IPSubnet6{sn6} -> sn6.addr == dst
+                                                IPSubnet6{sn6} -> sn6.addr == dst,
                                                 _              -> false
                                              }) {
                     pkt.payload.ip6.dst = pkt.payload.ip6.src;
@@ -823,7 +824,7 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
                     pkt.payload.ip6.icmp6.type = 129;
                     handled = true
                 } default { () }
-            } else { }
+            } else { () }
         },
         _ -> { () }
     };
@@ -834,7 +835,7 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
             EthIP4{IP4Pkt{_,_,_,_,_,_,ttl,_,_,dst,_}} -> {
                 the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and 
                                              match (lrn.network) {
-                                                 IPSubnet4{sn4} -> sn4.addr == dst
+                                                 IPSubnet4{sn4} -> sn4.addr == dst,
                                                  _              -> false
                                              }) {
                     the (nat in NAT | nat.lrouter == rport.lrouter and nat.external_ip == lrn.ip4_subnet.addr and 
@@ -842,19 +843,18 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
                         ()
                     } default { drop }
                 } default {
-                    if (ttl == 0 or ttl == 1) { drop };
+                    if (ttl == 0 or ttl == 1) { drop }
                 }
             },
             EthIP6{IP6Pkt{_,_,ttl,_,_,_,dst,_}} -> {
                 the (lrn in LRouterNetwork | lrn.lrouter == rport.lrouter and 
                                              match (lrn.network) {
-                                                 IPSubnet6{sn6} -> sn6.addr == dst
+                                                 IPSubnet6{sn6} -> sn6.addr == dst,
                                                  _              -> false
                                              }) {
                     drop
-                } 
-        // ICMP6 NSdefault {
-                    if (ttl == 0 or ttl == 1) { drop };
+                } default {
+                    if (ttl == 0 or ttl == 1) { drop }
                 }
             }
         };  
@@ -906,23 +906,21 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
         pkt.payload = EthARP{ARPPkt{ARPRequest, route.outportip, route.nexthop, pkt.src, 48'hffffffffffff}}
     };
 
-    if (nat_redirect) {
-        (rport.ptype.redirectChassis != chassis) {
-            the (dtun in TunnelFromTo | dtun.toChassis == rport.ptype.redirectChassis and dtun.fromChassis == chassis) {
-                pkt.vxlan.tun_dst = dtun.toip;
-                pkt.vxlan.tun_id  = rport.lrouter;
-                the (stun in TunnelPort | stun.switch == chassis) {
-                    send PTunnelPort[stun].out
-                }
-            } default { () }
-        }
+    if ((nat_redirect) and (rport.ptype.redirectChassis != chassis)) {
+        the (dtun in TunnelFromTo | dtun.toChassis == rport.ptype.redirectChassis and dtun.fromChassis == chassis) {
+            pkt.vxlan.tun_dst = dtun.toip;
+            pkt.vxlan.tun_id  = rport.lrouter;
+            the (stun in TunnelPort | stun.switch == chassis) {
+                send PTunnelPort[stun].out
+            }
+        } default { () }
     };
 
     rportEgress(chassis, rt.outport, false)
 }
 
 procedure unsnat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
-    match (pkt.payload, rport.ptype) {
+    match ((pkt.payload, rport.ptype)) {
         (EthIP4{ip4}, LRPGateway{rchassis}) -> {
             the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == SNAT or nat.ntype == DNAT_SNAT) and ip4.dst == nat.external_ip) {
                 match (nat.external_mac) {
@@ -943,7 +941,7 @@ procedure unsnat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
 }
 
 procedure dnat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
-    match (pkt.payload, rport.ptype) {
+    match ((pkt.payload, rport.ptype)) {
         (EthIP4{ip4}, LRPGateway{rchassis}) -> {
             the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == DNAT or nat.ntype == DNAT_SNAT) and ip4.dst == nat.external_ip) {
                 match (nat.external_mac) {
@@ -960,34 +958,34 @@ procedure dnat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
             } default { false }
         },
         _ -> false
+    }
 }
 
-procedure route(nat_redirect bool, rport : LogicalRouterPort, chassis : chassis_id_t) : Route = {
-        match (pkt.payload) {
-            EthIP4{ip4} -> {
-                the (r in Route | lrouter == rport.lrouter and
-                                  match(r.ip_prefix) {
-                                      IP4Subnet{sn4} -> ip4Match(ip4.dst, sn4),
-                                      _ -> false
-                                  }) {
-                    dec_ttl();
-                    pkt.src = r.outportmac;
-                    SomeRoute{r}
-                } default { NoRoute }
-            },
-            EthIP6{ip6} -> the (r in Route | ) {
-                the (r in Route | lrouter == rport.lrouter and
-                                  match(r.ip_prefix) {
-                                      IP6Subnet{sn6} -> ip6Match(ip6.dst, sn6),
-                                      _ -> false
-                                  }) {
-                    dec_ttl();
-                    pkt.src = r.outportmac;
-                    SomeRoute{r}
-                } default { NoRoute }
-            },
-            _ -> NoRoute
-        }
+procedure route(nat_redirect : bool, rport : LogicalRouterPort, chassis : chassis_id_t) : Route = {
+    match (pkt.payload) {
+        EthIP4{ip4} -> {
+            the (r in Route | lrouter == rport.lrouter and
+                              match(r.ip_prefix) {
+                                  IP4Subnet{sn4} -> ip4Match(ip4.dst, sn4),
+                                  _ -> false
+                              }) {
+                dec_ttl();
+                pkt.src = r.outportmac;
+                SomeRoute{r}
+            } default { NoRoute }
+        },
+        EthIP6{ip6} -> {
+            the (r in Route | lrouter == rport.lrouter and
+                              match(r.ip_prefix) {
+                                  IP6Subnet{sn6} -> ip6Match(ip6.dst, sn6),
+                                  _ -> false
+                              }) {
+                dec_ttl();
+                pkt.src = r.outportmac;
+                SomeRoute{r}
+            } default { NoRoute }
+        },
+        _ -> NoRoute
     }
 }
 
@@ -1041,7 +1039,7 @@ procedure rportEgress(chassis : chassis_id_t, rpid : lrouter_port_id_t, redirect
                                                             }) {
                               lportIngress(lport, chassis)
                           } default { drop },
-        SomePeer(peer) -> lrouterIngress(peer, chassis, false)
+        SomePeer{peer} -> lrouterIngress(peer, chassis, false)
     }
 }
 
@@ -1055,13 +1053,13 @@ procedure rportEgress(chassis : chassis_id_t, rpid : lrouter_port_id_t, redirect
     · A priority-0 logical flow with match 1 has actions next;.
 */
 procedure undnat(rport : lrouter_port_id_t, chassis : chassis_id_t) : () = {
-    match (pkt.payload, rport.ptype) {
+    match ((pkt.payload, rport.ptype)) {
         (EthIP4{ip4}, LRPGateway{rchassis}) -> {
             the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == DNAT or nat.ntype == DNAT_SNAT) and ip4.src == nat.logical_ip) {
                 match (nat.external_mac) {
                     NoMACAddr -> {
                         if (chassis == rchassis) {
-                            ct_dnat();
+                            ct_dnat()
                         }
                     },
                     SomeMACAddr{mac} -> {
@@ -1073,7 +1071,7 @@ procedure undnat(rport : lrouter_port_id_t, chassis : chassis_id_t) : () = {
         },
         _ -> ()
     }
-};
+}
 
 /* Egress Table 1: SNAT
    Packets that are configured to be SNATed get their source IP address changed based on the configuration in the OVN Northbound database.
@@ -1084,7 +1082,7 @@ procedure undnat(rport : lrouter_port_id_t, chassis : chassis_id_t) : () = {
    · A priority-0 logical flow with match 1 has actions next;.
 */
 procedure snat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
-    match (pkt.payload, rport.ptype) {
+    match ((pkt.payload, rport.ptype)) {
         (EthIP4{ip4}, LRPGateway{rchassis}) -> {
             the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == SNAT or nat.ntype == DNAT_SNAT) and ip4.src == nat.logical_ip) {
                 match (nat.external_mac) {
@@ -1101,6 +1099,7 @@ procedure snat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
             } default { () }
         },
         _ -> ()
+    }
 }
 
 #controller
@@ -1112,8 +1111,8 @@ procedure ctlMkNA(rport : lrouter_port_id_t, srcip : ip6_addr_t, srcmac : mac_ad
 }
 
 #controller
-procedure ctlPutND(rport : lrouter_port_id_t, ip : ip6_addr_t, mac) : sink = {
-    putND(rport, srcip, srcmac);
+procedure ctlPutND(rport : lrouter_port_id_t, ip : ip6_addr_t, mac : mac_addr_t) : sink = {
+    putND(rport, ip, mac);
     drop
 }
 
@@ -1124,5 +1123,5 @@ procedure mkARPResp(mac : mac_addr_t, ip : ip4_addr_t): () = {
     pkt.payload.arp.tha = pkt.payload.arp.sha;
     pkt.payload.arp.sha = mac;
     pkt.payload.arp.tpa = pkt.payload.arp.spa;
-    pkt.payload.arp.spa = ip;
+    pkt.payload.arp.spa = ip
 }

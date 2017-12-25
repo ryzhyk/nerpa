@@ -244,8 +244,8 @@ view LRouterNetwork ( lrouter : lrouter_id_t
 LRouterNetwork(lrouter, network) :- LogicalRouterPort(lrport, _, lrouter, _, _ ,_ ,_), 
                                     LRouterPortNetwork(lrport, network)
 
-view LRouterVIP ( lrouter : lrouter_id_t
-                , vip     : ip4_addr_t)
+view LRouterLBVIP ( lrouter : lrouter_id_t
+                  , vip     : ip4_addr_t)
 
 LRouterLBVIP(lrouter, vip) :- LBRouter(lb, lrouter), LBVIP(lb, IP4AddrPort{vip, _})
 
@@ -265,12 +265,12 @@ NATChassis(lrouter, ntype, external_ip, external_mac, logical_ip, logical_port, 
     LPortAtChassis(logical_port, _, chassis, f), not f
 
 /* Routes */
-table Route ( lrouter     : lrouter_id_t
-            , ip_prefix   : ip_subnet_t
-            , nexthop     : ip_addr_t
-            , outport     : lrouter_port_id_t
-            , outportmac  : mac_addr_t
-            , outportip   : ip_addr_t)
+view Route ( lrouter     : lrouter_id_t
+           , ip_prefix   : ip_subnet_t
+           , nexthop     : ip_addr_t
+           , outport     : lrouter_port_id_t
+           , outportmac  : mac_addr_t
+           , outportip   : ip_addr_t)
 
 Route(lrouter, ip_prefix, nexthop, outport, outportmac, IPAddr4{outportip}) :- 
     LogicalRouterStaticRoute (lrouter, ip_prefix, nexthop, outport),

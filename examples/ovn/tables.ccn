@@ -657,7 +657,7 @@ table NAT ( lrouter      : lrouter_id_t
 state table LearnedAddresses ( rport : lrouter_port_id_t
                              , ip    : ip_addr_t
                              , mac   : mac_addr_t
-                             , foreign key rport references LogicalRouterPort(id) )
+                             , foreign key (rport) references LogicalRouterPort(id) )
 
 /* DHCP_Options TABLE
        OVN implements native DHCPv4 support which caters to the common use case of providing an IPv4 address to a booting instance by providing stateless replies to
