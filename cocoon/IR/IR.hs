@@ -286,6 +286,7 @@ cfgSubstVar v e cfg = cfgMapCtx g f h cfg
     h ctx = case bbNext $ ctxGetBB cfg ctx of 
                  Send x          -> Send $ exprSubstVar v e x
                  Controller u xs -> Controller u $ map (exprSubstVar v e) xs
+                 Call fname xs   -> Call fname $ map (exprSubstVar v e) xs
                  n               -> n
 
 plSubstVar :: VarName -> Expr -> Pipeline -> Pipeline
@@ -350,6 +351,7 @@ actionRHSVars (ABuiltin _ as) = nub $ concatMap exprVars as
 data Next = Goto NodeId
           | Send Expr
           | Drop
+          | Call String [Expr]
           | Controller String [Expr]
           deriving(Eq)
 
@@ -357,6 +359,7 @@ instance PP Next where
     pp (Goto nid)        = "goto" <+> pp nid
     pp (Send p)          = "send" <+> pp p
     pp Drop              = "drop"
+    pp (Call f xs)       = "call" <+> pp f <+> (hcat $ punctuate "," $ map pp xs)
     pp (Controller f xs) = "controller" <+> pp f <+> (hcat $ punctuate "," $ map pp xs)
 
 instance Show Next where
@@ -426,7 +429,10 @@ instance G.Labellable Edge where
 -- DAG
 type CFG = G.Gr Node Edge
 
-data Pipeline = Pipeline {plVars :: Vars, plCFG :: CFG, plEntryNode :: NodeId}
+data Pipeline = Pipeline { plInputs :: [Expr]
+                         , plVars :: Vars
+                         , plCFG :: CFG
+                         , plEntryNode :: NodeId}
 
 type Vars = M.Map VarName Type
 
@@ -606,6 +612,7 @@ ctxRHSVars cfg ctx | isActCtx ctx = actionRHSVars $ ctxAction cfg ctx
                    | otherwise    = case bbNext $ ctxGetBB cfg ctx of
                                          Send x          -> exprVars x
                                          Controller _ xs -> nub $ concatMap exprVars xs
+                                         Call _ xs       -> nub $ concatMap exprVars xs
                                          _               -> []
 
 ctxAssignsFullVar :: CFG -> VarName -> CFGCtx -> Bool

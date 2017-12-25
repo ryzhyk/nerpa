@@ -52,7 +52,7 @@ import qualified NS                as C
 -- Uniquely identify an instance of the switch:
 type SwitchId = Integer
 
-type IRSwitch = [(String, I.Pipeline)]
+type IRSwitch = M.Map String I.Pipeline
 type IRSwitches = M.Map String IRSwitch
 
 maxOFTables = 255
@@ -76,16 +76,17 @@ precompile structs workdir r rfile = do
                        ir' <- mapM (\(n, pl) -> do pl' <- I.allocVarsToRegisters pl rfile
                                                    let rdotname = workdir </> addExtension (addExtension n "reg") "dot"
                                                    trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl') rdotname; return ""}) $ return (n, pl')
-                                                `catchError` (\e -> throwError $ "Compiling port " ++ n ++ " of " ++ name sw ++ ":" ++ e)) ir
+                                                `catchError` (\e -> throwError $ "Compiling port " ++ n ++ " of " ++ name sw ++ ":" ++ e)) 
+                                   $ M.toList ir
                        let (ntables, ir'') = assignTables ir'
                        mapM_ (\(n, pl) -> do let dotname = workdir </> addExtension (addExtension n "of") "dot"
                                              trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl) dotname; return ""}) $ return ()) ir''
                        when (ntables > maxOFTables) 
                            $ throwError $ name sw ++ " requires " ++ show ntables ++ " OpenFlow tables, but only " ++ show maxOFTables ++ " tables are available"
-                       return (name sw, ir'')) $ C.refineSwitches r
+                       return (name sw, M.fromList ir'')) $ C.refineSwitches r
 
 -- Relabel port CFGs into openflow table numbers
-assignTables :: IRSwitch -> (Int, IRSwitch)
+assignTables :: [(String, I.Pipeline)] -> (Int, [(String, I.Pipeline)])
 assignTables pls = foldl' (\(start, pls') (n,pl) -> let (start', pl') = relabel start pl
                                                     in (start', pls' ++ [(n, pl')])) (1, []) pls
     where 
@@ -113,7 +114,8 @@ buildSwitch r structs s ports db swid = (table0 : (staticcmds ++ updcmds), s')
     -- Configure static part of the pipeline
     staticcmds = let ?r = r 
                      ?structs = structs
-                 in concatMap (\(pname, pl) -> concatMap (mkNode pname) $ G.labNodes $ I.plCFG pl) ports
+                     ?ir = ports
+                 in concatMap (\(pname, pl) -> concatMap (mkNode pname) $ G.labNodes $ I.plCFG pl) $ M.toList ports
     -- Configure dynamic part from primary tables
     (updcmds, s') = updateSwitch r structs (M.insert swid (M.empty,0) s) ports swid (M.map (map (True,)) db)
 
@@ -124,12 +126,14 @@ updateSwitch r structs s ports swid db = (portcmds ++ nodecmds, M.insert swid ss
     -- update table0 if ports have been added or removed
     portcmds = let ?r = r 
                    ?structs = structs
-               in concatMap (\(pname, pl) -> updatePort pname pl swid db) ports
+                   ?ir = ports
+               in concatMap (\(pname, pl) -> updatePort pname pl swid db) $ M.toList ports
     -- update pipeline nodes
     (nodecmds, ssw') = let ?r = r 
-                           ?structs = structs in
+                           ?structs = structs 
+                           ?ir = ports in
                        let (cmds, ssw) = runState (mapM (\(pname, pl) -> (liftM concat) $ mapM (updateNode db pname pl swid) 
-                                                                                        $ G.labNodes $ I.plCFG pl) ports) 
+                                                                                        $ G.labNodes $ I.plCFG pl) $ M.toList ports) 
                                                   (s' M.! swid)
                        in (concat cmds, ssw)
 
@@ -143,7 +147,7 @@ updatePort pname pl i db = delcmd ++ addcmd
     delcmd = concatMap (\(_,f) -> map (O.DelFlow 0 1) $ match f) del
     addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [O.ActionGoto $ I.plEntryNode pl]) $ match f) add
 
-mkNode :: (?r::C.Refine, ?structs::B.StructReify) => String -> (I.NodeId, I.Node) -> [O.Command]
+mkNode :: (?r::C.Refine, ?structs::B.StructReify, ?ir::IRSwitch) => String -> (I.NodeId, I.Node) -> [O.Command]
 mkNode pname (nd, node) =
     case node of
          I.Par bs                    -> [ O.AddGroup $ O.Group nd O.GroupAll $ mapIdx (\b i -> O.Bucket Nothing $ mkStaticBB pname nd i b) bs 
@@ -154,7 +158,7 @@ mkNode pname (nd, node) =
          I.Lookup _ _ _ _ el I.Rand  -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pname nd 1 el]
          I.Fork{}                    -> []
 
-updateNode :: (?r::C.Refine, ?structs::B.StructReify) => I.Delta -> String -> I.Pipeline -> SwitchId -> (I.NodeId, I.Node) -> State SwRuntimeState [O.Command]
+updateNode :: (?r::C.Refine, ?structs::B.StructReify, ?ir::IRSwitch) => I.Delta -> String -> I.Pipeline -> SwitchId -> (I.NodeId, I.Node) -> State SwRuntimeState [O.Command]
 updateNode db pname portpl swid (nd, node) = 
     case node of
          I.Par _                      -> return []
@@ -275,10 +279,10 @@ recordField rec fexpr = C.evalConstExpr ?r (f fexpr)
     f (C.E (C.EField _ e fl)) = C.eField (f e) fl
     f e                       = error $ "IR2OF.recordField.f " ++ show e
 
-mkStaticBB :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.NodeId -> Int -> I.BB -> [O.Action]
+mkStaticBB :: (?r::C.Refine, ?structs::B.StructReify, ?ir::IRSwitch) => String -> I.NodeId -> Int -> I.BB -> [O.Action]
 mkStaticBB pname nd i b = mkBB pname nd i (error "IR2OF.mkStaticBB requesting field value") b
 
-mkBB :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.NodeId -> Int -> C.Expr -> I.BB -> [O.Action]
+mkBB :: (?r::C.Refine, ?structs::B.StructReify, ?ir::IRSwitch) => String -> I.NodeId -> Int -> C.Expr -> I.BB -> [O.Action]
 mkBB pname nd i val (I.BB as n) = map (mkAction ival) as ++ mkNext pname nd i ival n
     where ival = I.val2Record ?r ?structs (C.exprConstructor $ C.enode val) val
 
@@ -305,7 +309,7 @@ slice (O.EField f Nothing)       h l = O.EField f $ Just (h, l)
 slice (O.EField f (Just (_,l0))) h l = O.EField f $ Just (l0+h, l0+l)
 slice (O.EVal (O.Value _ v))     h l = O.EVal $ O.Value (h-l) $ bitSlice v h l
 
-mkLookupFlow :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.NodeId -> C.Expr -> I.FPipeline -> Either I.BB [O.Action] -> [O.Flow]
+mkLookupFlow :: (?r::C.Refine, ?structs::B.StructReify, ?ir::IRSwitch) => String -> I.NodeId -> C.Expr -> I.FPipeline -> Either I.BB [O.Action] -> [O.Flow]
 mkLookupFlow pname nd val lpl b = {-trace ("mkLookupFlow " ++ show val ++ " " ++ show (I.plCFG $ snd $ lpl val)) $-} map (\m -> O.Flow 1 m as) matches
     where
     matches = mkPLMatch $ lpl val
@@ -495,12 +499,19 @@ exprMask (I.EBinOp BAnd e1 e2) m i | I.exprIsConst e2
                                    = exprMask e1 (m .&. I.exprIntVal e2) i
 exprMask e                     _ _ = error $ "IR2OF.exprMask: expression too complicated " ++ show e
 
-mkNext :: (?r::C.Refine) => String -> I.NodeId -> Int -> I.Record -> I.Next -> [O.Action]
+mkNext :: (?r::C.Refine, ?ir::IRSwitch) => String -> I.NodeId -> Int -> I.Record -> I.Next -> [O.Action]
 mkNext _ _  _ _ (I.Goto nd)        = [O.ActionGoto nd]
 mkNext _ _  _ r (I.Send e)         = [O.ActionOutput $ mkExpr r e]
 mkNext _ _  _ _ I.Drop             = [O.ActionDrop]
+mkNext _ _  _ r (I.Call f as)      = (map (\(a,i) -> O.ActionSet i a) constargs) ++ 
+                                     (map (\(a,_) -> O.ActionPush a) varargs) ++ 
+                                     (map (\(_,i) -> O.ActionPop i) $ reverse varargs) ++
+                                     [O.ActionGoto $ I.plEntryNode pl]
+    where
+    pl = ?ir M.! f
+    (constargs, varargs) = partition (O.exprIsConst . fst) $ zip (map (mkExpr r) as) (map (mkExpr r) $ I.plInputs pl)
 mkNext n nd i _ (I.Controller _ _) = [ O.ActionSet (O.EField (O.Field "metadata" 64) Nothing) 
-                                                      (O.EVal $ O.Value 64 $ ((toInteger portnum) `shiftL` 48) + ((toInteger nd) `shiftL` 16) + toInteger i)
+                                                   (O.EVal $ O.Value 64 $ ((toInteger portnum) `shiftL` 48) + ((toInteger nd) `shiftL` 16) + toInteger i)
                                         , O.ActionController]
     where portnum = fromJust $ findIndex ((== n) . name) $ C.refinePorts ?r
     

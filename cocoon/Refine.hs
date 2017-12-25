@@ -16,6 +16,7 @@ limitations under the License.
 {-# LANGUAGE RecordWildCards, LambdaCase #-}
 
 module Refine( funcGraph
+             , funcGraphNoSink
              , refineStructs
              --, refineIsMulticast
              --, refineIsDeterministic
@@ -34,6 +35,7 @@ import Syntax
 import Name
 import NS
 
+
 funcGraph :: Refine -> G.Gr String ()
 funcGraph Refine{..} = 
     let g0 = foldl' (\g (i,f) -> G.insNode (i,name f) g)
@@ -42,6 +44,19 @@ funcGraph Refine{..} =
                              Nothing -> g
                              Just e  -> foldl' (\g' f' -> G.insEdge (i, fromJust $ findIndex ((f'==) . name) $ refineFuncs, ()) g') g (exprFuncs e))
            g0 $ zip [0..] refineFuncs
+
+funcGraphNoSink :: Refine -> G.Gr String ()
+funcGraphNoSink r@Refine{..} = 
+    let g0 = foldl' (\g (i,f) -> G.insNode (i,name f) g)
+                    G.empty $ zip [0..] refineFuncs in
+    foldl' (\g (i,f) -> case funcDef f of
+                             Nothing -> g
+                             Just e  -> foldl' (\g' f' -> if funcType (getFunc r f') == tSink 
+                                                             then G.insEdge (i, fromJust $ findIndex ((f'==) . name) $ refineFuncs, ()) g'
+                                                             else g') g (exprFuncs e))
+           g0 $ zip [0..] refineFuncs
+
+
 
 refineStructs :: Refine -> [Type]
 refineStructs r = concatMap (\t -> case t of 

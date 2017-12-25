@@ -56,44 +56,53 @@ type CompileState a = State I.Pipeline a
 type VMap = M.Map String String
 
 addVar :: I.VarName -> I.Type -> CompileState ()
-addVar n t = modify $ \(I.Pipeline vs cfg nd') -> I.Pipeline (M.insert n t vs) cfg nd'
+addVar n t = modify $ \pl -> pl{I.plVars = M.insert n t $ I.plVars pl}
 
 allocNode ::  CompileState I.NodeId
 allocNode = do
-    I.Pipeline vs cfg nd <- get
+    I.Pipeline inp vs cfg nd <- get
     let nid = if' (G.order cfg == 0) 0 ((snd $ G.nodeRange cfg) + 1)
-    put $ I.Pipeline vs (G.insNode (nid, I.Par []) cfg) nd
+    put $ I.Pipeline inp vs (G.insNode (nid, I.Par []) cfg) nd
     return nid
 
 setEntryNode :: I.NodeId -> CompileState ()
-setEntryNode nd = modify $ \(I.Pipeline vs cfg _) -> I.Pipeline vs cfg nd
+setEntryNode nd = modify $ \pl -> pl{I.plEntryNode = nd}
+
+addInputs :: [I.Expr] -> CompileState ()
+addInputs inputs = modify $ \pl -> pl{I.plInputs = (I.plInputs pl) ++ inputs}
 
 updateNode :: I.NodeId -> I.Node -> [I.NodeId] -> CompileState ()
-updateNode nid n suc = modify $ \(I.Pipeline vs cfg end) -> let (to, _, _, from) = G.context cfg nid
-                                                                cfg' = (to, nid, n, from) G.& (G.delNode nid cfg)
-                                                                cfg'' = foldl' (\_cfg s -> G.insEdge (nid, s, I.Edge) _cfg) cfg' suc
-                                                            in I.Pipeline vs cfg'' end
+updateNode nid n suc = modify $ \pl@I.Pipeline{..} -> let (to, _, _, from) = G.context plCFG nid
+                                                          cfg' = (to, nid, n, from) G.& (G.delNode nid plCFG)
+                                                          cfg'' = foldl' (\_cfg s -> G.insEdge (nid, s, I.Edge) _cfg) cfg' suc
+                                                      in pl{I.plCFG = cfg''}
 
-compileSwitch :: StructReify -> FilePath -> Refine -> Switch -> [(String, I.Pipeline)]
-compileSwitch structs workdir r sw = map (\port -> (name port, compilePort structs workdir r port)) ports
+compileSwitch :: StructReify -> FilePath -> Refine -> Switch -> M.Map String I.Pipeline
+compileSwitch structs workdir r sw = I.optimize 0 $ M.fromList $ portpls ++ funcpls
     where
     ports = filter ((== switchRel sw) . portSwitchRel r) 
                    $ refinePorts r
+    portpls = map (\port -> (name port, compilePort structs workdir r port)) ports
+    sinks = filter ((== tSink) . funcType) 
+            $ map (getFunc r)
+            $ nub $ concatMap (exprFuncsRec r . fromJust . funcDef . getFunc r . portIn) ports 
+    funcpls = map (\func -> (name func, compileFunc structs workdir r func)) sinks
+    
 
 compilePort :: StructReify -> FilePath -> Refine -> SwitchPort -> I.Pipeline
 compilePort structs workdir r port =
     let ?r = r in 
     let ?s = structs in
-    let compiled = execState (compilePort' port) (I.Pipeline M.empty G.empty 0)
+    let compiled = execState (compilePort' port) (I.Pipeline [] M.empty G.empty 0)
         dotname = workdir </> addExtension (name port) "dot"
-        odotname = workdir </> addExtension (addExtension (name port) "opt") "dot"
-        optimized = trace (unsafePerformIO $ do {I.cfgDump (I.plCFG compiled) dotname; return ""}) 
-                    $ I.optimize 0 compiled 
-    in trace (unsafePerformIO $ do {I.cfgDump (I.plCFG optimized) odotname; return ""}) optimized
-
+        --odotname = workdir </> addExtension (addExtension (name port) "opt") "dot"
+        --optimized = trace (unsafePerformIO $ do {I.cfgDump (I.plCFG compiled) dotname; return ""}) 
+        --            $ I.optimize 0 compiled 
+    in trace (unsafePerformIO $ do {I.cfgDump (I.plCFG compiled) dotname; return ""}) compiled
 
 skipFuncs :: Refine -> [String]
-skipFuncs r = map name $ filter (elem (AnnotController nopos) . funcAnnot) $ refineFuncs r
+skipFuncs r = nub $ map name $ (filter (elem (AnnotController nopos) . funcAnnot) $ refineFuncs r) ++
+                               (filter ((== tSink) . funcType) $ refineFuncs r)
 
 compilePort' :: (?s::StructReify, ?r::Refine) => SwitchPort -> CompileState ()
 compilePort' SwitchPort{..} = do 
@@ -101,22 +110,38 @@ compilePort' SwitchPort{..} = do
     setEntryNode entrynd
     let f = getFunc ?r portIn
     let key = name $ head $ funcArgs f
+    let rel = getRelation ?r portRel
+    pl <- get
+    let c = eBinOp Eq (eField (eVar key) "portnum") (eField ePacket "portnum")
+    let (_, ccols, cpl) = exprDeps M.empty (CtxFunc f CtxRefine) rel entrynd key c pl
+    updateNode entrynd (I.Lookup (name rel) [] (ccols, cpl) (I.BB [] $ I.Call (name f) (relCols rel)) (I.BB [] I.Drop) I.First) []
+
+compileFunc :: StructReify -> FilePath -> Refine -> Function -> I.Pipeline
+compileFunc structs workdir r fun =
+    let ?r = r in 
+    let ?s = structs in
+    let compiled = execState (compileFunc' fun) (I.Pipeline [] M.empty G.empty 0)
+        dotname = workdir </> addExtension (name fun) "dot"
+        --odotname = workdir </> addExtension (addExtension (name fun) "opt") "dot"
+        --optimized = trace (unsafePerformIO $ do {I.cfgDump (I.plCFG compiled) dotname; return ""}) 
+        --            $ I.optimize 0 compiled 
+    in trace (unsafePerformIO $ do {I.cfgDump (I.plCFG compiled) dotname; return ""}) compiled
+
+compileFunc' :: (?s::StructReify, ?r::Refine) => Function -> CompileState ()
+compileFunc' f@Function{..} = do 
+    entrynd <- allocNode
+    setEntryNode entrynd
     let skip = skipFuncs ?r
-    let inlined = exprInline ?r skip (CtxFunc f CtxRefine) $ fromJust $ funcDef f
+    let inlined = exprInline ?r skip (CtxFunc f CtxRefine) $ fromJust funcDef
     let e = {-trace ("inlined spec:\n\n" ++ show inlined) $-} evalState (expr2Statement ?r (CtxFunc f CtxRefine) inlined) 0
     case exprValidate ?r (CtxFunc f CtxRefine) e of
          Left er  -> error $ "Compile2IR.compilePort': failed to validate transformed expression: " ++ er
          Right _  -> return ()
-
-    let rel = getRelation ?r portRel
-    plvars <- gets (M.keys . I.plVars)
-    (vars, asns) <- declAsnVar M.empty key (relRecordType rel) entrynd $ relCols rel
-    pl <- get
-    let c = eBinOp Eq (eField (eVar key) "portnum") (eField ePacket "portnum")
-    let (cdeps, ccols, cpl) = exprDeps vars (CtxFunc f CtxRefine) rel entrynd key c pl
-        cdeps' = cdeps `intersect` plvars
-    (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxFunc f CtxRefine) Nothing e
-    updateNode entrynd (I.Lookup (name rel) cdeps' (ccols, cpl) (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) I.First) [entryndb]
+    vars <- foldM (\vars_ arg -> do (vars', inpvars) <- declVar vars_ (name arg) (typ arg) entrynd
+                                    addInputs $ map (uncurry I.EVar) inpvars
+                                    return vars') M.empty funcArgs
+    _ <- {-trace ("port statement:\n\n" ++ show e) $-} compileExprAt vars (CtxFunc f CtxRefine) entrynd Nothing e
+    return ()
 
 compileExpr :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
 compileExpr vars ctx exitnd e = do
@@ -300,7 +325,7 @@ exprDeps vars ctx rel nd relvar e pl = (deps, depcols, snd . fpl)
                       -- isolate subgraph that computes e only
                       cfg' = G.nfilter (\nd' -> elem nd' $ G.dfs [entry] (I.plCFG pl')) $ I.plCFG pl'
                       -- optimize to eliminate unused variables
-                      pl'' = I.optimize (-1000) $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
+                      pl'' = I.plOptimize [-1000] $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
                       -- substitute variable names with column names
                       cols = relCols rel
                       relvs = map fst $ var2Scalars relprefix (relRecordType rel)

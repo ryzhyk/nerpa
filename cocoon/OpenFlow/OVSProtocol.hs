@@ -155,7 +155,7 @@ doPacketIn r msg@PacketIn{..} = (do
     let port = refinePorts swRefine !! pidx
     let switch = fromJust $ find ((== portSwitchRel swRefine port) . switchRel) $ refineSwitches swRefine
     let swir = swIR M.! (name switch)
-    let pl = fromJust $ lookup (name port) swir
+    let pl = swir M.! (name port)
     node <- case G.lab (IR.plCFG pl) nd of
                  Nothing -> error $ "invalid node number " ++ show nd
                  Just x  -> return x

@@ -156,4 +156,6 @@ checksum16BS bs | l `mod` 2 == 0 = checksum16 $ runGet (sequence $ replicate (l 
                 | otherwise      = checksum16 $ runGet (sequence $ replicate ((l `div` 2) + 1)  getWord16be) $ BL.snoc bs 0
     where l = fromIntegral $ BL.length bs
 
-
+removeIndices :: [a] -> [Int] -> [a]
+removeIndices xs indices = 
+    foldl' (\xs' i -> take i xs' ++ drop (i+1) xs') xs $ reverse $ sort indices

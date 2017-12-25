@@ -84,6 +84,8 @@ data Action = ActionOutput     {actPort :: Expr}
             | ActionBuiltin    {actBInName :: String, actBInArgs :: [Expr]}
             | ActionGoto       {actGotoTable :: HTable}
             | ActionController
+            | ActionPush       {actArg :: Expr}
+            | ActionPop        {actArg :: Expr}
 
 data Flow = Flow { flowPriority :: Prio
                  , flowMatch    :: [Match]

@@ -194,6 +194,8 @@ mkAction _ (OF.ActionSet l r)                            = "move:" <> mkExprA r 
 mkAction False (OF.ActionGoto t)                             = "goto_table:" <> pp t
 mkAction True (OF.ActionGoto t)                             = "resubmit" <> (parens $ comma <> pp t)
 mkAction _ OF.ActionController                           = "controller"
+mkAction _ (OF.ActionPush e)                             = "push:" <> mkExprA e
+mkAction _ (OF.ActionPop e)                              = "pop:" <> mkExprA e
 mkAction _ (OF.ActionBuiltin "ct" [zone])                = "ct(zone=" <> mkExprA zone <> ")"
 mkAction _ (OF.ActionBuiltin "ct_commit" [zone])         = "ct(commit, zone=" <> mkExprA zone <> ")"
 mkAction _ (OF.ActionBuiltin "ct_commit" [zone,label])   = "ct(commit, zone=" <> mkExprA zone <> ", exec(set_field:" <> mkExprA label <> "->ct_label))"

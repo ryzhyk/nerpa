@@ -207,9 +207,10 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
         h :: CFG -> CFGCtx -> Next
         h cfg ctx = case bbNext $ ctxGetBB cfg ctx of
                          Send x          -> Send $ rename x
+                         Call f xs       -> Call f $ map rename xs
                          Controller u xs -> Controller u $ map rename xs
                          n      -> n
     let cfg' = cfgMapCtx g (f $ plCFG pl) (h $ plCFG pl) $ plCFG pl
     return {-$ trace ("register allocation:\n" ++ 
                     (concatMap (\(v,t) -> v ++ ": " ++ show t ++ " -> " ++ show (rename $ EVar v) ++ "\n") $ M.toList $ plVars pl))-}
-           $ pl{plVars = mkvars $ plVars pl, plCFG = cfg'}
+           $ pl{plInputs = map rename $ plInputs pl, plVars = mkvars $ plVars pl, plCFG = cfg'}

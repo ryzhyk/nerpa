@@ -17,7 +17,8 @@ limitations under the License.
 
 {-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections, FlexibleContexts, LambdaCase #-}
 
-module IR.Optimize(optimize) where
+module IR.Optimize( optimize
+                  , plOptimize) where
  
 import qualified Data.Graph.Inductive as G 
 import qualified Data.Map as M
@@ -27,56 +28,105 @@ import Data.Maybe
 --import Debug.Trace
 --import System.IO.Unsafe
 
+import Util
 import IR.IR
 
-optimize :: Int -> Pipeline -> Pipeline
-optimize p pl | modified  = optimize (p+1) pl'
-              | otherwise = pl'
-    where (pl', modified) = --trace(unsafePerformIO $ do {writeFile ("pass" ++ show p ++ ".dot") $ cfgToDot $ plCFG pl; return ""}) $
+optimize :: Int -> M.Map String Pipeline -> M.Map String Pipeline
+optimize iter pls = if all (null . snd) vars then pls' else optimize (iter+1) pls''
+    where
+    plsvars = M.map (\pl -> let (pl', (_, vars_)) = runState (plOptimize' [iter] pl) (False, [])
+                            in (pl', vars_)) pls
+    pls' = M.map fst plsvars
+    vars = M.toList $ M.map snd plsvars
+    pls'' = foldl' removeInputVars pls' vars
+
+-- Unused input variables found in one of the pipelines. Remove these
+-- inputs and modify all call sites.
+removeInputVars :: M.Map String Pipeline -> (String, [VarName]) -> M.Map String Pipeline
+removeInputVars pls (_, []) = pls
+removeInputVars pls (plname, vars) = M.adjust (\pl_ -> pl_{plInputs = removeIndices (plInputs pl_) indices}) plname pls'
+    where
+    pl = pls M.! plname
+    indices = map (\v -> fromJust $ findIndex ((==v) . exprVarName) $ plInputs pl) vars
+    pls' = M.map (plRemoveInputVars plname indices) pls
+
+plRemoveInputVars :: String -> [Int] -> Pipeline -> Pipeline
+plRemoveInputVars callee indices pl@Pipeline{..} = pl{plCFG = cfg'}
+    where cfg' = cfgMapCtx (\_ n -> n) (Just . ctxAction plCFG) h plCFG
+          h ctx = case bbNext $ ctxGetBB plCFG ctx of
+                       Call x as | x == callee -> Call x $ removeIndices as indices
+                       n                       -> n
+
+type OptState = State (Bool, [VarName])
+
+setChanged :: OptState ()
+setChanged = modify (\(_, vars) -> (True, vars))
+
+resetChanged :: OptState ()
+resetChanged = modify (\(_, vars) -> (False, vars))
+
+getChanged :: OptState Bool
+getChanged = gets fst
+
+addUnused :: [VarName] -> OptState ()
+addUnused vs = modify (\(c, vars) -> (c, vars ++ vs))
+
+plOptimize :: [Int] -> Pipeline -> Pipeline
+plOptimize iter pl = evalState (plOptimize' iter pl) (False, [])
+
+
+plOptimize' :: [Int] -> Pipeline -> OptState Pipeline
+plOptimize' iter pl = fixpoint iter pl pass
+
+{-
+plOptimize :: Int -> Pipeline -> (Pipeline, [VarName])
+plOptimize p pl | modified  = plOptimize (p+1) pl'
+                | otherwise = pl'
+    where (pl', (modified,)) = --trace(unsafePerformIO $ do {writeFile ("pass" ++ show p ++ ".dot") $ cfgToDot $ plCFG pl; return ""}) $
                             --trace ("******** optimizer pass " ++ show p ++ " *********") $
                             runState (pass pl) False
+-}
 
 -- one pass of the optimizer
-pass :: Pipeline -> State Bool Pipeline
-pass pl = do
-    pl1 <- fixpoint pl (\pl_ -> do pl1_ <- {-trace "optUnusedAssigns" $-} optUnusedAssigns pl_
-                                   pl2_ <- {-trace "optUnusedVars" $-} optUnusedVars pl1_
-                                   {-trace "optVarSubstitute" $-}
-                                   optVarSubstitute pl2_)
+pass :: [Int] -> Pipeline -> OptState Pipeline
+pass iter pl = do
+    pl1 <- fixpoint (iter ++ [0]) pl (\iter' pl_ -> do pl1_ <- {-trace "optUnusedAssigns" $-} optUnusedAssigns iter' pl_
+                                                       pl2_ <- {-trace "optUnusedVars" $-} optUnusedVars iter' pl1_
+                                                       {-trace "optVarSubstitute" $-}
+                                                       optVarSubstitute iter' pl2_)
     -- do these last, as they may duplicate code, breaking the variable
     -- substitution optimization
-    pl2 <- {-trace "optMergeCond" $-} fixpoint pl1 optMergeCond
-    pl3 <- {-trace "optStraightLine" $-} fixpoint pl2 optStraightLine
-    pl4 <- {-trace "optEntryNode" $-} fixpoint pl3 optEntryNode
+    pl2 <- {-trace "optMergeCond" $-}    fixpoint (iter ++ [0]) pl1 optMergeCond
+    pl3 <- {-trace "optStraightLine" $-} fixpoint (iter ++ [0]) pl2 optStraightLine
+    pl4 <- {-trace "optEntryNode" $-}    fixpoint (iter ++ [0]) pl3 optEntryNode
     return pl4
 
-fixpoint :: a -> (a -> State Bool a) -> State Bool a
-fixpoint x f = do
-    x' <- f x
-    modified <- get
+fixpoint :: [Int] -> a -> ([Int] -> a -> OptState a) -> OptState a
+fixpoint iter x f = do
+    x' <- f iter x
+    modified <- getChanged
     if modified 
-       then do put False
-               x'' <- fixpoint x' f 
-               put True
+       then do resetChanged
+               x'' <- fixpoint (init iter ++ [last iter + 1]) x' f 
+               setChanged
                return x''
        else return x'
 
-
 -- Eliminate trivial entry node
-optEntryNode :: Pipeline -> State Bool Pipeline
-optEntryNode pl@Pipeline{..} =
+optEntryNode :: [Int] -> Pipeline -> OptState Pipeline
+optEntryNode _ pl@Pipeline{..} =
     case G.lab plCFG plEntryNode of
-         Just (Par [BB [] (Goto n)]) -> do put True      
+         Just (Par [BB [] (Goto n)]) -> do setChanged      
                                            let (_, cfg') = G.match plEntryNode plCFG
-                                           return $ Pipeline plVars cfg' n
+                                           return $ Pipeline plInputs plVars cfg' n
          --Nothing                     -> trace (unsafePerformIO $ do {cfgDump plCFG "strange.dot"; return ""}) $ error "wtf"
          _                           -> return pl
 
 -- Merge nodes that contain straight-line code with predecessors
-optStraightLine :: Pipeline -> State Bool Pipeline
-optStraightLine pl =
+optStraightLine :: [Int] -> Pipeline -> OptState Pipeline
+optStraightLine _ pl =
     foldM (\pl_ n -> case G.lab (plCFG pl_) n of
-                          Just (Par [b]) -> do put True     
+                          Just (Par [b]) -> do setChanged
                                                return $ merge pl_ n b
                           _              -> return pl_) pl 
           $ filter (/= plEntryNode pl) 
@@ -96,13 +146,13 @@ merge pl@Pipeline{..} n (BB as nxt) = pl{plCFG = cfg'}
 
 
 -- Remove assignments whose LHS is never read in the future
-optUnusedAssigns :: Pipeline -> State Bool Pipeline
-optUnusedAssigns pl = do
-    let f :: CFGCtx -> State Bool (Maybe Action)
+optUnusedAssigns :: [Int] -> Pipeline -> OptState Pipeline
+optUnusedAssigns _ pl = do
+    let f :: CFGCtx -> OptState (Maybe Action)
         f ctx = f' ctx (ctxAction (plCFG pl) ctx)
         f' ctx a@(ASet e1 _) | isNothing mvar = return $ Just a
                              | used           = return $ Just a
-                             | otherwise      = do put True
+                             | otherwise      = do setChanged
                                                    return Nothing
             where mvar = var e1
                   var (EVar x _)     = Just x
@@ -117,26 +167,27 @@ optUnusedAssigns pl = do
     return pl{plCFG = cfg'}
 
 -- Remove unused variables
-optUnusedVars :: Pipeline -> State Bool Pipeline
-optUnusedVars pl = do
+optUnusedVars :: [Int] -> Pipeline -> OptState Pipeline
+optUnusedVars _ pl = do
     let used = nub $ concatMap nodeVars $ map snd $ G.labNodes $ plCFG pl
     let vars = M.keys $ plVars pl
     let unused = vars \\ used
     if null unused
        then return pl
-       else do put True
+       else do setChanged
+               addUnused $ unused `intersect` (map exprVarName $ plInputs pl)
                return $ foldl' removeVar pl unused
 
 removeVar :: Pipeline -> VarName -> Pipeline
 removeVar pl v = pl{plVars = M.delete v (plVars pl)}
 
 -- Substitute variable values
-optVarSubstitute :: Pipeline -> State Bool Pipeline
-optVarSubstitute pl@Pipeline{..} = do
+optVarSubstitute :: [Int] -> Pipeline -> OptState Pipeline
+optVarSubstitute _ pl@Pipeline{..} = do
     cfg' <- cfgMapCtxM (varSubstNode plCFG) (varSubstAction plCFG) (varSubstNext plCFG) plCFG
     return pl{plCFG = cfg'}
 
-varSubstNode :: CFG -> NodeId -> Node -> State Bool Node
+varSubstNode :: CFG -> NodeId -> Node -> OptState Node
 varSubstNode cfg nd node = do
     let -- variables that occur in the node
         vars = case node of
@@ -154,10 +205,10 @@ varSubstNode cfg nd node = do
                               Cond{..}   -> node_{nodeConds = map (\(c,b) -> (exprSubstVar v e c, b)) nodeConds}
                               Par{}      -> error "IROptimize.varSubstNode Par") 
                        node substs
-    when (not $ null substs) $ put True
+    when (not $ null substs) setChanged
     return node'
 
-varSubstAction :: CFG -> CFGCtx -> State Bool (Maybe Action)
+varSubstAction :: CFG -> CFGCtx -> OptState (Maybe Action)
 varSubstAction cfg ctx = do
     let act = ctxAction cfg ctx
         vars = actionRHSVars act
@@ -172,14 +223,15 @@ varSubstAction cfg ctx = do
                              --ADelete  t c  -> ADelete t $ exprSubstVar v e c
                              )
                        act substs
-    when (not $ null substs) $ put True
+    when (not $ null substs) setChanged
     return $ Just act'
 
-varSubstNext :: CFG -> CFGCtx -> State Bool Next
+varSubstNext :: CFG -> CFGCtx -> OptState Next
 varSubstNext cfg ctx = do
     let nxt = bbNext $ ctxGetBB cfg ctx
         substs = case nxt of
                       Send x          -> mapMaybe (\v -> fmap (v,) $ findSubstitution cfg ctx v) $ exprVars x
+                      Call _ xs       -> mapMaybe (\v -> fmap (v,) $ findSubstitution cfg ctx v) $ nub $ concatMap exprVars xs
                       Controller _ xs -> -- don't substitute column names in packet-in actions
                                          filter (not . any isCol . exprAtoms . snd)
                                                 $ mapMaybe (\v -> fmap (v,) $ findSubstitution cfg ctx v) $ nub $ concatMap exprVars xs
@@ -191,10 +243,11 @@ varSubstNext cfg ctx = do
                         --trace ("substitute " ++ v ++  " with " ++ show e ++ "\n         in action " ++ show act) $
                         case nxt_ of
                              Send x          -> Send $ exprSubstVar v e x
+                             Call f xs       -> Call f $ map (exprSubstVar v e) xs
                              Controller u xs -> Controller u $ map (exprSubstVar v e) xs
                              _               -> nxt_)
                        nxt substs
-    when (not $ null substs) $ put True
+    when (not $ null substs) setChanged
     return nxt'
 
 findSubstitution :: CFG -> CFGCtx -> String -> Maybe Expr
@@ -229,8 +282,8 @@ findSubstitution cfg ctx v =
     abort2 ctx' ctx_ = ctx' == ctx_
 
 -- Merge cascades of cond nodes
-optMergeCond :: Pipeline -> State Bool Pipeline
-optMergeCond pl@Pipeline{..} = do
+optMergeCond :: [Int] -> Pipeline -> OptState Pipeline
+optMergeCond _ pl@Pipeline{..} = do
     cfg' <- foldM (\cfg_ n -> 
                     case G.lab cfg_ n of
                          -- conditional node
@@ -238,13 +291,13 @@ optMergeCond pl@Pipeline{..} = do
                                                 -- unique predecessor that is also a conditional node with exactly one branch pointing towards n ...
                                                 (Just ([(_, n')], _, _, _), _) -> 
                                                     case G.lab cfg_ n' of
-                                                         Just (Cond cs') | length (filter ((==Goto n) .bbNext . snd) cs') == 1 -> do
+                                                         Just (Cond cs') | length (filter ((==Goto n) . bbNext . snd) cs') == 1 -> do
                                                              -- and does not modify variables n depends on
                                                              let vs = concatMap (exprAtoms . fst) cs
                                                                  vs' = concatMap (bbLHSAtoms . snd) 
                                                                        $ filter ((==Goto n) . bbNext . snd) cs'
                                                              if null $ vs `intersect` vs'
-                                                                then do put True     
+                                                                then do setChanged     
                                                                         return $ mergeCond cfg_ n' n
                                                                 else return cfg_
                                                          _ -> return cfg_
