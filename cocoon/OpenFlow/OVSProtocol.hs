@@ -27,7 +27,6 @@ import Control.Exception
 import Control.Concurrent
 import Data.List
 import Data.IORef
-import Data.Maybe
 import Data.Bits
 import Data.Binary.Get
 import Data.Binary.Put
@@ -44,7 +43,6 @@ import Name
 import Backend
 import Eval
 import Syntax
-import Port
 import OpenFlow.OVSPacket
 import OpenFlow.OVSConst
 import qualified OpenFlow.IR2OF    as OF
@@ -147,15 +145,15 @@ doPacketIn r msg@PacketIn{..} = (do
     let oxmmap = mapOXMs $ oxms match
     let inpnum = fmap inPortID $ M.lookup OInPort oxmmap
     -- locate IR node based on metadata in the packet
-    (pidx,nd,i) <- case M.lookup OMetadata oxmmap of 
-                        Just Metadata{..} -> let slice x h l = fromIntegral $ bitSlice x h l in
-                                             return (slice oxmMetadata 63 48, slice oxmMetadata 47 16, slice oxmMetadata 15 0)
-                        _                 -> error "message does not contain metadata value"
-    when (pidx >= (length $ refinePorts swRefine)) $ error $ "invalid port number " ++ show pidx
-    let port = refinePorts swRefine !! pidx
-    let switch = fromJust $ find ((== portSwitchRel swRefine port) . switchRel) $ refineSwitches swRefine
+    (pidx,swidx, nd,i) <- case M.lookup OMetadata oxmmap of 
+                               Just Metadata{..} -> let slice x h l = fromIntegral $ bitSlice x h l in
+                                                    return (slice oxmMetadata 63 48, slice oxmMetadata 47 32, slice oxmMetadata 31 16, slice oxmMetadata 15 0)
+                               _                 -> error "message does not contain metadata value"
+    when (swidx >= (length $ refineSwitches swRefine)) $ error $ "invalid switch number " ++ show swidx
+    let switch = refineSwitches swRefine !! swidx
     let swir = swIR M.! (name switch)
-    let pl = swir M.! (name port)
+    when (pidx >= (M.size swir)) $ error $ "invalid pipeline number " ++ show pidx
+    let pl = snd $ M.toList swir !! pidx
     node <- case G.lab (IR.plCFG pl) nd of
                  Nothing -> error $ "invalid node number " ++ show nd
                  Just x  -> return x

@@ -34,8 +34,8 @@ import IR.IR
 optimize :: Int -> M.Map String Pipeline -> M.Map String Pipeline
 optimize iter pls = if all (null . snd) vars then pls' else optimize (iter+1) pls''
     where
-    plsvars = M.map (\pl -> let (pl', (_, vars_)) = runState (plOptimize' [iter] pl) (False, [])
-                            in (pl', vars_)) pls
+    plsvars = M.mapWithKey (\_ pl -> let (pl', (_, vars_)) = runState (plOptimize' [iter] pl) (False, [])
+                                     in {-trace ("eliminating unused inputs in " ++ n ++ " " ++ show vars_) $-} (pl', vars_)) pls
     pls' = M.map fst plsvars
     vars = M.toList $ M.map snd plsvars
     pls'' = foldl' removeInputVars pls' vars

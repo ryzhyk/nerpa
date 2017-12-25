@@ -34,7 +34,7 @@ module Syntax( pktVar
              , consType
              , Rule(..)
              , FuncAnnotation(..)
-             , Function(..)
+             , Function(..), funcRunsOnController
              , Assume(..)
              , Type(..)
              , tLocation, tBool, tInt, tString, tBit, tArray, tStruct, tTuple, tOpaque, tUser, tSink, tLambda
@@ -363,6 +363,9 @@ instance PP Function where
 
 instance Show Function where
     show = render . pp
+
+funcRunsOnController :: Function -> Bool
+funcRunsOnController f = any (== AnnotController nopos) $ funcAnnot f
 
 data Constructor = Constructor { consPos :: Pos
                                , consName :: String

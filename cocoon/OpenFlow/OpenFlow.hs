@@ -83,6 +83,7 @@ data Action = ActionOutput     {actPort :: Expr}
             | ActionSet        {actLHS :: Expr, actRHS :: Expr}
             | ActionBuiltin    {actBInName :: String, actBInArgs :: [Expr]}
             | ActionGoto       {actGotoTable :: HTable}
+            | ActionResubmit   {actResubmitTable :: HTable}
             | ActionController
             | ActionPush       {actArg :: Expr}
             | ActionPop        {actArg :: Expr}

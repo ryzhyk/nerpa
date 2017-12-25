@@ -365,6 +365,18 @@ instance PP Next where
 instance Show Next where
     show = render . pp
 
+nextVars :: Next -> [VarName]
+nextVars (Call _ xs)       = nub $ concatMap exprVars xs
+nextVars (Controller _ xs) = nub $ concatMap exprVars xs
+nextVars (Send x)          = exprVars x
+nextVars _                 = []
+
+nextCols :: Next -> [ColName]
+nextCols (Call _ xs)       = nub $ concatMap exprCols xs
+nextCols (Controller _ xs) = nub $ concatMap exprCols xs
+nextCols (Send x)          = exprCols x
+nextCols _                 = []
+
 -- Basic block
 data BB = BB {bbActions :: [Action], bbNext :: Next}
 
@@ -375,10 +387,10 @@ instance Show BB where
     show = render . pp
 
 bbVars :: BB -> [VarName]
-bbVars (BB as _) = nub $ concatMap actionVars as
+bbVars (BB as nxt) = nub $ concatMap actionVars as ++ nextVars nxt
 
 bbCols :: BB -> [ColName]
-bbCols (BB as _) = nub $ concatMap actionCols as
+bbCols (BB as nxt) = nub $ concatMap actionCols as ++ nextCols nxt
 
 data Selection = First
                | Rand

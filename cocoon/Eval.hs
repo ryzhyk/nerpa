@@ -37,7 +37,7 @@ import Data.Tuple.Select
 import Control.Monad.State.Strict
 import Text.PrettyPrint
 import System.IO.Unsafe
-import Debug.Trace
+--import Debug.Trace
 
 import Expr
 import qualified SMT             as SMT

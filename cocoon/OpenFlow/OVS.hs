@@ -65,7 +65,7 @@ ovsBuildSwitch ref workdir r sw f@(DL.Fact rname _) ir db = do
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        (cmds, s') = OF.buildSwitch r ovsStructReify s (ir M.! name sw) db swid
+        (cmds, s') = OF.buildSwitch r ovsStructReify s (name sw, ir M.! name sw) db swid
     ovsResetSwitch workdir r sw f
     sendCmds workdir rname swid swaddr swname cmds
     writeIORef ref s'
@@ -76,7 +76,7 @@ ovsUpdateSwitch ref workdir r sw f@(DL.Fact rname _) ir delta = do
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        (cmds, s') = OF.updateSwitch r ovsStructReify s (ir M.! name sw) swid delta
+        (cmds, s') = OF.updateSwitch r ovsStructReify s (name sw, ir M.! name sw) swid delta
     when (not $ null cmds) $ sendCmds workdir rname swid swaddr swname cmds
     writeIORef ref s'
 
@@ -191,8 +191,9 @@ mkAction _ (OF.ActionGroup  g)                           = "group:" <> pp g
 mkAction _ OF.ActionDrop                                 = "drop"
 mkAction _ (OF.ActionSet l r@OF.EVal{})                  = "load:" <> mkExprA r <> "->" <> mkExprA l
 mkAction _ (OF.ActionSet l r)                            = "move:" <> mkExprA r <> "->" <> mkExprA l
-mkAction False (OF.ActionGoto t)                             = "goto_table:" <> pp t
-mkAction True (OF.ActionGoto t)                             = "resubmit" <> (parens $ comma <> pp t)
+mkAction False (OF.ActionGoto t)                         = "goto_table:" <> pp t
+mkAction True (OF.ActionGoto t)                          = "resubmit" <> (parens $ comma <> pp t)
+mkAction _ (OF.ActionResubmit t)                         = "resubmit" <> (parens $ comma <> pp t)
 mkAction _ OF.ActionController                           = "controller"
 mkAction _ (OF.ActionPush e)                             = "push:" <> mkExprA e
 mkAction _ (OF.ActionPop e)                              = "pop:" <> mkExprA e

@@ -83,9 +83,9 @@ compileSwitch structs workdir r sw = I.optimize 0 $ M.fromList $ portpls ++ func
     ports = filter ((== switchRel sw) . portSwitchRel r) 
                    $ refinePorts r
     portpls = map (\port -> (name port, compilePort structs workdir r port)) ports
-    sinks = filter ((== tSink) . funcType) 
+    sinks = filter (\f -> funcType f == tSink && not (funcRunsOnController f)) 
             $ map (getFunc r)
-            $ nub $ concatMap (exprFuncsRec r . fromJust . funcDef . getFunc r . portIn) ports 
+            $ nub $ concatMap (\port -> portIn port : (exprFuncsRec r $ fromJust $ funcDef $ getFunc r $ portIn port)) ports 
     funcpls = map (\func -> (name func, compileFunc structs workdir r func)) sinks
     
 
@@ -101,7 +101,7 @@ compilePort structs workdir r port =
     in trace (unsafePerformIO $ do {I.cfgDump (I.plCFG compiled) dotname; return ""}) compiled
 
 skipFuncs :: Refine -> [String]
-skipFuncs r = nub $ map name $ (filter (elem (AnnotController nopos) . funcAnnot) $ refineFuncs r) ++
+skipFuncs r = nub $ map name $ (filter funcRunsOnController $ refineFuncs r) ++
                                (filter ((== tSink) . funcType) $ refineFuncs r)
 
 compilePort' :: (?s::StructReify, ?r::Refine) => SwitchPort -> CompileState ()
@@ -150,9 +150,14 @@ compileExpr vars ctx exitnd e = do
     return (entrynd, vars')
 
 compileExprAt :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> I.NodeId -> Maybe I.NodeId -> Expr -> CompileState VMap
-compileExprAt vars ctx entrynd _ (E e@(EApply _ f as)) = do
+compileExprAt vars ctx entrynd _ (E e@(EApply _ f as)) | funcRunsOnController $ getFunc ?r f = do
     let as' = mapIdx (\a i -> mkScalarExpr vars (CtxApply e ctx i) a) as
     updateNode entrynd (I.Par [I.BB [] $ I.Controller f as']) []
+    return vars
+
+compileExprAt vars ctx entrynd _ (E e@(EApply _ f as)) = do
+    let as' = concat $ mapIdx (\a i -> mkExpr vars (CtxApply e ctx i) a) as
+    updateNode entrynd (I.Par [I.BB [] $ I.Call f as']) []
     return vars
 
 compileExprAt vars ctx entrynd exitnd (E e@(EBuiltin _ bin _)) = 
