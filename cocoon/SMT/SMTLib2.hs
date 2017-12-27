@@ -33,6 +33,7 @@ import System.Process
 import System.Exit
 import Control.Monad.Except
 import Data.String.Utils
+--import Debug.Trace
 
 import Name
 import Util
@@ -201,7 +202,7 @@ runSolver cfg query parser =
                                     "\nparser error: "++ show e
                  Right x -> x
                             {-trace "solver input: " 
-                            $ trace (render quert)
+                            $ trace (render query)
                             $ trace " solver output: " 
                             $ trace out x-}) 
            (error $ "Error code returned by SMT solver: " ++ show ecode ++

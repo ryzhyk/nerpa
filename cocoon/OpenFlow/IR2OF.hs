@@ -77,7 +77,7 @@ precompile structs workdir r rfile = do
                        ir' <- mapM (\(n, pl) -> do pl' <- I.allocVarsToRegisters pl rfile
                                                    let rdotname = workdir </> addExtension (addExtension n "reg") "dot"
                                                    trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl') rdotname; return ""}) $ return (n, pl')
-                                                `catchError` (\e -> throwError $ "Compiling port " ++ n ++ " of " ++ name sw ++ ":" ++ e)) 
+                                                `catchError` (\e -> throwError $ "Compiling pipeline " ++ n ++ " of switch " ++ name sw ++ ":" ++ e)) 
                                    $ M.toList ir
                        let (ntables, ir'') = assignTables ir'
                        mapM_ (\(n, pl) -> do let dotname = workdir </> addExtension (addExtension n "of") "dot"
