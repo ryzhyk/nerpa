@@ -55,6 +55,7 @@ instance WithName Builtin where
 
 builtins :: [Builtin]
 builtins = [ bprint
+           , bdecTTL
            , bct
            --, bctField "ct_inv"   IR.TBool
            --, bctField "ct_rel"   IR.TBool
@@ -65,6 +66,8 @@ builtins = [ bprint
            , bctField "ct_label" (IR.TBit 128)
            , bctCommit
            , bctLB
+           , bctSNAT
+           , bctDNAT
            ]
 
 {- Some reusable implementations -}
@@ -117,6 +120,25 @@ printEval :: Expr -> EvalState Expr
 printEval (E (EBuiltin _ _ es)) = do mapM_ eyield es
                                      return $ eTuple []
 printEval e = error $ "Builtins.printEval " ++ show e
+
+{- dec_ttl() -}
+
+bdecTTL = Builtin "dec_ttl" 
+                  decttlValidate1
+                  skipValidate2
+                  decttlType
+                  compileExprAt
+                  (\_ _ _ _ _ -> notImplemented "dec_ttl" "bfuncMkExpr")
+                  (\_ -> notImplemented "dec_ttl" "decttlEval")
+                  
+
+decttlType :: Refine -> ECtx -> ExprNode (Maybe Type) -> Type
+decttlType _ _ _ = tTuple []
+
+decttlValidate1 :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
+decttlValidate1 _ _   (E (EBuiltin _ _ [])) = return()                                         
+decttlValidate1 r _   (E (EBuiltin p _ _))  = errR r p $ "dec_ttl() does not take arguments"
+decttlValidate1 _ _   e                     = error $ "Builtins.decttlValidate1 " ++ show e
 
 {- ct() -}
 
@@ -223,6 +245,54 @@ ctLBValidate2 _ _   e                   = error $ "Builtins.ctLBValidate2 " ++ s
 ctLBType :: Refine -> ECtx -> ExprNode (Maybe Type) -> Type
 ctLBType _ _ _ = tTuple []
 
+{- ct_snat(zone), ct_snat(zone, ip) -}
+bctSNAT = Builtin "ct_snat" 
+                  ctSNATValidate1
+                  ctSNATValidate2
+                  ctSNATType
+                  compileExprAt
+                  (\_ _ _ _ _ -> notImplemented "ct_snat" "bfuncMkExpr")
+                  (\_ -> notImplemented "ct_snat" "bfuncEval")
+
+ctSNATValidate1 :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
+ctSNATValidate1 _ _   (E (EBuiltin _ _ [_]))     = return()                                         
+ctSNATValidate1 _ _   (E (EBuiltin _ _ [_,_]))   = return()                                         
+ctSNATValidate1 r _   (E (EBuiltin p _ _))       = errR r p $ "ct_snat() takes one or two arguments"
+ctSNATValidate1 _ _   e                          = error $ "Builtins.ctSNATValidate1 " ++ show e
+
+ctSNATValidate2 :: (MonadError String me) => Refine -> ECtx -> ExprNode Type -> me ()
+ctSNATValidate2 r _   (EBuiltin _ _ as)   = do matchType (pos $ head as) r (tBit 16) (head as)
+                                               when (length as >= 2) 
+                                                  $ matchType (pos $ as !! 1) r (tUser "ip4_addr_t") (as !! 1)
+ctSNATValidate2 _ _   e                   = error $ "Builtins.ctSNATValidate2 " ++ show e
+
+ctSNATType :: Refine -> ECtx -> ExprNode (Maybe Type) -> Type
+ctSNATType _ _ _ = tTuple []
+
+
+{- ct_dnat(zone), ct_dnat(zone, ip) -}
+bctDNAT = Builtin "ct_dnat" 
+                  ctDNATValidate1
+                  ctDNATValidate2
+                  ctDNATType
+                  compileExprAt
+                  (\_ _ _ _ _ -> notImplemented "ct_dnat" "bfuncMkExpr")
+                  (\_ -> notImplemented "ct_dnat" "bfuncEval")
+
+ctDNATValidate1 :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
+ctDNATValidate1 _ _   (E (EBuiltin _ _ [_]))     = return()                                         
+ctDNATValidate1 _ _   (E (EBuiltin _ _ [_,_]))   = return()                                         
+ctDNATValidate1 r _   (E (EBuiltin p _ _))       = errR r p $ "ct_dnat() takes one or two arguments"
+ctDNATValidate1 _ _   e                          = error $ "Builtins.ctDNATValidate1 " ++ show e
+
+ctDNATValidate2 :: (MonadError String me) => Refine -> ECtx -> ExprNode Type -> me ()
+ctDNATValidate2 r _   (EBuiltin _ _ as)   = do matchType (pos $ head as) r (tBit 16) (head as)
+                                               when (length as >= 2) 
+                                                  $ matchType (pos $ as !! 1) r (tUser "ip4_addr_t") (as !! 1)
+ctDNATValidate2 _ _   e                   = error $ "Builtins.ctDNATValidate2 " ++ show e
+
+ctDNATType :: Refine -> ECtx -> ExprNode (Maybe Type) -> Type
+ctDNATType _ _ _ = tTuple []
 
 -- {- select!(array, index) -}
 -- 
