@@ -661,7 +661,7 @@ procedure tunIngress(port: TunnelPort): sink = {
     if (pkt.vxlan.tun_id[23:23] == 0) {
         vSwitchEgress(false, port.switch, pkt.vxlan.tun_id)
     } else {
-        rportEgress(port.switch, pkt.vxlan.tun_id, true)
+        rportEgress(port.switch, pkt.vxlan.tun_id[31:0], true)
     }
 }
 
@@ -694,17 +694,20 @@ procedure lrouterIngress(rpid : lrouter_port_id_t, chassis : chassis_id_t, egres
 function l2AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t, p : Packet) : bool = {
     if (p.vlan.vid != 0 or ethMulticastAddr(p.src)) {
         false
-    } else if (ethMulticastAddr(p.dst) or p.dst == rport.mac) {
-        match(rport.ptype){
-            LRPRegular    -> true,
-            LRPGateway{c} -> c == chassis
-        }
     } else {
-        // XXX: Why does this rule only apply to DNAT_SNAT rules
-        the (nat in NATChassis | rportIsGW(rport.ptype) and nat.lrouter == rport.lrouter and nat.ntype == DNAT_SNAT and 
-                                 nat.external_mac == p.dst and chassis == nat.chassis) {
+        the (rp in LogicalRouterPort | rp.id == rport.id and (p.dst == rp.mac or ethMulticastAddr(p.dst)) and
+                                       match(rp.ptype){
+                                           LRPRegular    -> true,
+                                           LRPGateway{c} -> c == chassis
+                                       }) {
             true
-        } default { false }
+        } default {
+            // XXX: Why does this rule only apply to DNAT_SNAT rules
+            the (nat in NATChassis | rportIsGW(rport.ptype) and nat.lrouter == rport.lrouter and nat.ntype == DNAT_SNAT and 
+                                     nat.external_mac == SomeMACAddr{p.dst} and chassis == nat.chassis) {
+                true
+            } default { false }
+        }
     }
 }
 
@@ -766,11 +769,12 @@ procedure rportARPReq(rport : LogicalRouterPort, chassis : chassis_id_t) : bool 
                     } default {
                         the (nat in NATChassis | nat.lrouter == rport.lrouter and (nat.ntype == DNAT or nat.ntype == DNAT_SNAT) and
                                                  nat.external_ip == tpa and 
+                                                 match (nat.external_mac) {SomeMACAddr{_} -> true, _ -> false} and
                                                  match (rport.ptype) {
                                                      LRPGateway{_} -> chassis == nat.chassis,
                                                      _             -> false
                                                  }) {
-                            mkARPResp(nat.external_mac, nat.external_ip);
+                            mkARPResp(nat.external_mac.addr, nat.external_ip);
                             true
                         } 
                     }
@@ -1087,17 +1091,17 @@ procedure rportDeliver(rport : LogicalRouterPort, chassis : chassis_id_t) : sink
 procedure undnat(rport : LogicalRouterPort, chassis : chassis_id_t) : () = {
     match ((pkt.payload, rport.ptype)) {
         (EthIP4{ip4}, LRPGateway{rchassis}) -> {
-            the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == DNAT or nat.ntype == DNAT_SNAT) and ip4.src == nat.logical_ip.addr) {
+            the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == DNAT or nat.ntype == DNAT_SNAT) and ip4.src == nat.logical_ip.addr and
+                              match (nat.external_mac) {
+                                  NoMACAddr -> chassis == rchassis,
+                                  SomeMACAddr{_} -> true
+                              }) {
+                ct_dnat(rport.ct_zone);
                 match (nat.external_mac) {
-                    NoMACAddr -> {
-                        if (chassis == rchassis) {
-                            ct_dnat(rport.ct_zone)
-                        }
-                    },
                     SomeMACAddr{mac} -> {
-                        ct_dnat(rport.ct_zone);
                         pkt.src = mac
-                    }
+                    },
+                    _ -> ()
                 }
             } default { () }
         },
@@ -1116,19 +1120,20 @@ procedure undnat(rport : LogicalRouterPort, chassis : chassis_id_t) : () = {
 procedure snat(rport : LogicalRouterPort, chassis : chassis_id_t) : () = {
     match ((pkt.payload, rport.ptype)) {
         (EthIP4{ip4}, LRPGateway{rchassis}) -> {
-            the (nat in NAT | nat.lrouter == rport.lrouter and (nat.ntype == SNAT or nat.ntype == DNAT_SNAT) and ip4.src == nat.logical_ip.addr) {
-                match (nat.external_mac) {
-                    NoMACAddr -> {
-                        if (chassis == rchassis) {
-                            ct_snat(rport.ct_zone, nat.external_ip)
-                        }
-                    },
-                    SomeMACAddr{mac} -> {
-                        ct_snat(rport.ct_zone, nat.external_ip);
-                        pkt.src = mac
-                    }
-                }
-            } default { () }
+            the (nat in NATChassis | nat.lrouter == rport.lrouter and 
+                                     (nat.ntype == SNAT or nat.ntype == DNAT_SNAT) and 
+                                     ip4.src == nat.logical_ip.addr and
+                                     nat.external_mac == NoMACAddr and
+                                     nat.chassis == chassis) {
+                ct_snat(rport.ct_zone, nat.external_ip)
+            } default {
+                the (nat in NATChassis | nat.lrouter == rport.lrouter and 
+                                         (nat.ntype == SNAT or nat.ntype == DNAT_SNAT) and 
+                                         ip4.src == nat.logical_ip.addr) {
+                    ct_snat(rport.ct_zone, nat.external_ip);
+                    pkt.src = nat.external_mac.addr
+                } default { () }
+            }
         },
         _ -> ()
     }

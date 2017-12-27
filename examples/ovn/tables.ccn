@@ -567,7 +567,7 @@ table LBRouter ( lb      : lb_id_t
 
  */
 
-typedef lrouter_port_id_t = bit<64>
+typedef lrouter_port_id_t = bit<32>
 
 typedef lrouter_port_type_t = LRPRegular
                             | LRPGateway { redirectChassis : chassis_id_t }
@@ -870,7 +870,7 @@ table PhysicalNetwork( id   : pnet_id_t
                      , name : string
                      , primary key (id) )
 
-typedef chassis_id_t = bit<64>
+typedef chassis_id_t = bit<32>
 
 table Chassis ( id     : chassis_id_t
               , failed : bool

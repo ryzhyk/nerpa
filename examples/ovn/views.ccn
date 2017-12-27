@@ -255,14 +255,18 @@ LRouterLBVIP(lrouter, vip) :- LBRouter(lb, lrouter), LBVIP(lb, IP4AddrPort{vip, 
 view NATChassis ( lrouter      : lrouter_id_t
                 , ntype        : nat_type_t
                 , external_ip  : ip4_addr_t
-                , external_mac : mac_addr_t
+                , external_mac : opt_mac_addr_t
                 , logical_ip   : ip4_subnet_t
                 , logical_port : lport_id_t
                 , chassis      : chassis_id_t)
 
-NATChassis(lrouter, ntype, external_ip, external_mac, logical_ip, logical_port, chassis) :-
+NATChassis(lrouter, ntype, external_ip, SomeMACAddr{external_mac}, logical_ip, logical_port, chassis) :-
     NAT(lrouter, ntype, external_ip, SomeMACAddr{external_mac}, logical_ip, SomeLPortId{logical_port}),
     LPortAtChassis(logical_port, _, chassis, f), not f
+
+NATChassis(lrouter, ntype, external_ip, NoMACAddr, logical_ip, 0, chassis) :-
+    NAT(lrouter, ntype, external_ip, NoMACAddr, logical_ip, SomeLPortId{logical_port}),
+    LogicalRouterPort(_, _, lrouter, LRPGateway{chassis}, _, e, _, _), e
 
 /* Routes */
 view Route ( lrouter     : lrouter_id_t
