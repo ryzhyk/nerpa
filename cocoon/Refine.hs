@@ -51,7 +51,7 @@ funcGraphNoSink r@Refine{..} =
                     G.empty $ zip [0..] refineFuncs in
     foldl' (\g (i,f) -> case funcDef f of
                              Nothing -> g
-                             Just e  -> foldl' (\g' f' -> if funcType (getFunc r f') == tSink 
+                             Just e  -> foldl' (\g' f' -> if funcType (getFunc r f') /= tSink 
                                                              then G.insEdge (i, fromJust $ findIndex ((f'==) . name) $ refineFuncs, ()) g'
                                                              else g') g (exprFuncs e))
            g0 $ zip [0..] refineFuncs
