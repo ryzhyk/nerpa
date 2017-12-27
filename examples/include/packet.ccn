@@ -71,9 +71,9 @@ function pktIsIP4(p: eth_pkt_t) : bool =
 
 function pktIsDNSReq(p: eth_pkt_t) : bool =
     match (p.payload) {
-        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}} -> dst == 53,
-        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}}       -> dst == 53,
-        _                                                                -> false
+        EthIP4{IP4Pkt{_,_,_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}} -> dst == 53,
+        EthIP6{IP6Pkt{_,_,_,_,_,_,_, IPUDP{UDPPkt{_, dst, _, _}}}}     -> dst == 53,
+        _                                                              -> false
     }
 
 // OVS connection tracker interface. See man ovs-ofctl for documentation
@@ -122,8 +122,7 @@ typedef eth_payload_t = EthIP4   {ip4 : ip4_pkt_t}
 
 typedef ip_proto_t = bit<8>
 
-typedef ip4_pkt_t = IP4Pkt { ihl      : bit<4>
-                           , dscp     : bit<6>
+typedef ip4_pkt_t = IP4Pkt { dscp     : bit<6>
                            , ecn      : bit<2>
                            , totalLen : bit<16>
                            , ident    : bit<16>
