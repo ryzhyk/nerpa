@@ -482,7 +482,7 @@ exprValidate1 r ctx (EApply p f as)     = do fun <- checkFunc p r f
                                              when (not $ funcPure fun) $ do 
                                                   ctxCheckSideEffects p r ctx
                                                   -- make sure the procedure respects constraints on global variables and relations visibility
-                                                  exprTraverseCtxM (exprValidate1 r) (CtxFunc fun ctx) $ fromJust $ funcDef fun
+                                                  --exprTraverseCtxM (exprValidate1 r) (CtxFunc fun ctx) $ fromJust $ funcDef fun
 exprValidate1 _ _   (EField _ _ _)      = return ()
 exprValidate1 r _   (ELocation p pr _ _)= do _ <- checkPort p r pr
                                              return ()
