@@ -149,7 +149,7 @@ updatePort pname pl i db = delcmd ++ addcmd
     addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [O.ActionGoto $ I.plEntryNode pl]) $ match f) add
 
 mkNode :: (?r::C.Refine, ?structs::B.StructReify, ?ir::(String, IRSwitch)) => String -> (I.NodeId, I.Node) -> [O.Command]
-mkNode plname (nd, node) =
+mkNode plname (nd, node) = {-trace ("mkNode " ++ show nd) $-}
     case node of
          I.Par [b]                   -> [ O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB plname nd 0 b ]
          I.Par bs                    -> [ O.AddGroup $ O.Group nd O.GroupAll $ mapIdx (\b i -> O.Bucket Nothing $ mkStaticBB plname nd i b) bs 
@@ -161,7 +161,7 @@ mkNode plname (nd, node) =
          I.Fork{}                    -> []
 
 updateNode :: (?r::C.Refine, ?structs::B.StructReify, ?ir::(String, IRSwitch)) => I.Delta -> String -> I.Pipeline -> SwitchId -> (I.NodeId, I.Node) -> State SwRuntimeState [O.Command]
-updateNode db plname portpl swid (nd, node) = 
+updateNode db plname portpl swid (nd, node) = {-trace ("updateNode " ++ show nd) $-}
     case node of
          I.Par _                      -> return []
          I.Cond _                     -> return []
@@ -313,7 +313,7 @@ slice (O.EField f (Just (_,l0))) h l = O.EField f $ Just (l0+h, l0+l)
 slice (O.EVal (O.Value _ v))     h l = O.EVal $ O.Value (h-l) $ bitSlice v h l
 
 mkLookupFlow :: (?r::C.Refine, ?structs::B.StructReify, ?ir::(String, IRSwitch)) => String -> I.NodeId -> C.Expr -> I.FPipeline -> Either I.BB [O.Action] -> [O.Flow]
-mkLookupFlow plname nd val lpl b = {-trace ("mkLookupFlow " ++ show val ++ " " ++ show (I.plCFG $ snd $ lpl val)) $-} map (\m -> O.Flow 1 m as) matches
+mkLookupFlow plname nd val lpl b = {-trace ("mkLookupFlow " ++ show val ++ " " ++ show (I.plCFG $ lpl val)) $-} map (\m -> O.Flow 1 m as) matches
     where
     matches = mkPLMatch $ lpl val
     as = case b of 
@@ -331,7 +331,7 @@ mkCond ((c, a):cs) = let cs' = mkCond cs
                                  (x, False) -> mapMaybe (\(y, a') -> fmap ((,a')) $ concatMatches x y) cs') c'
 
 mkCond' :: I.Expr -> [([O.Match], Bool)]
-mkCond' c = 
+mkCond' c = {-trace ("mkCond " ++ show c) $-}
     case I.exprEval c of
          I.EBinOp Eq e1 e2 | I.exprIsBool e1 
                                        -> let e1s = mkCond' e1
@@ -440,10 +440,10 @@ mkPLMatchAction _    a                = error $ "IR2OF.mkPLMatchAction " ++ show
 -}
 
 mkSimpleCond :: I.Expr -> [[O.Match]]
-mkSimpleCond e = mkSimpleCond' $ I.exprEval e
+mkSimpleCond e = {-trace ("mkSimpleCond " ++ show e) $-} mkSimpleCond' $ I.exprEval e
 
 mkSimpleCond' :: I.Expr -> [[O.Match]]
-mkSimpleCond' c =
+mkSimpleCond' c = 
     case c of
          I.EBinOp Eq e1 e2 | I.exprIsBit e1
                                      -> mkMatch e1 e2
