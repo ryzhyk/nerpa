@@ -737,9 +737,9 @@ def mkRelExpr(sym, op, const):
     for c in cs:
         expr = ""
         if s == "inport":
-            expr =  "lp" + o + mkId(c[1:-1],8)
+            expr =  "lp" + o + mkLPortId(c[1:-1])
         elif s == "outport" and o == "==":
-            expr = "lp" + o + mkId(c[1:-1],8)
+            expr = "lp" + o + mkLPortId(c[1:-1])
         elif s in symTable:
             if len(symTable[s]) == 1 and symTable[s][0][1] == None:
                 expr = "(" + symTable[s][0][0] + o + c + ")"
@@ -811,6 +811,18 @@ def mkDirection(d):
         return "ACLTo"
     else:
         raise Exception("unsupported ACL direction :" + d)
+
+def mkTunPortId(name):
+    return mkId(name, 8)
+
+def mkChassisId(cname):
+    return mkId(cname, 4)
+
+def mkVPortId(vname):
+    return mkId(vname, 8)
+
+def mkLPortId(lpname):
+    return mkId(lpname, 8)
 
 def mkSwId(swname):
     return mkId(swname[-3:], 8)
@@ -925,7 +937,7 @@ def ovnLspAdd(cmd):
         # XXX: hack: we currently don't have a way to generate unique zone id's
         zone = port.translate(None, string.ascii_letters)
         cocoon('LogicalSwitchPort.put(LogicalSwitchPort{' +
-                 ', '.join([mkId(port, 8), mkSwId(sw), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', zone]) + '})')
+                 ', '.join([mkLPortId(port), mkSwId(sw), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', zone]) + '})')
     return False
 
 def ovnLspSetAddresses(cmd):
@@ -934,11 +946,11 @@ def ovnLspSetAddresses(cmd):
     addr_strs = map(addrStr, addrs)
     log('adding switch port addresses ' + port + ' ' + ','.join(addr_strs))
 
-    cocoon("{LogicalSwitchPortMAC.delete(?.lport==" + mkId(port, 8) + "); LogicalSwitchPortIP.delete(?.lport==" + mkId(port, 8) + ")}")
+    cocoon("{LogicalSwitchPortMAC.delete(?.lport==" + mkLPortId(port) + "); LogicalSwitchPortIP.delete(?.lport==" + mkLPortId(port) + ")}")
     for addr in addrs:
         addrtype = addr.children[0].symbol.name
         if addrtype == "unknown":
-            cocoon("the (lp in LogicalSwitchPort | lp.id == " + mkId(port, 8)+ ") {LogicalSwitchPort.delete(?.id == lp.id); lp.unknown_addr=true; LogicalSwitchPort.put(lp)}")
+            cocoon("the (lp in LogicalSwitchPort | lp.id == " + mkLPortId(port)+ ") {LogicalSwitchPort.delete(?.id == lp.id); lp.unknown_addr=true; LogicalSwitchPort.put(lp)}")
         elif addrtype == "dynamic":
             #cocoon("LogicalSwitchPortDynAddr.put(LogicalSwitchPortDynAddr{" + ", ".join([???, mkId(port, 8), "0", "NoIPAddr"]) + "})")
             raise Exception("not implemented: lsp-set-addresses dynamic")
@@ -946,13 +958,13 @@ def ovnLspSetAddresses(cmd):
             raise Exception("not implemented: lsp-set-addresses router")
         else:
             mac = mkMACAddr(getField(addr, 'EthAddress').value)
-            cocoon("LogicalSwitchPortMAC.put(LogicalSwitchPortMAC{" + mkId(port, 8) + ", " + mac + "})")
+            cocoon("LogicalSwitchPortMAC.put(LogicalSwitchPortMAC{" + mkLPortId(port) + ", " + mac + "})")
             ips = map(mkIPAddr,
                       itertools.takewhile(lambda x: x.children[0].symbol.name != "invalid",
                                           getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList')))
             log("ips: " + str(ips))
             for ip in ips:
-                cocoon("LogicalSwitchPortIP.put(LogicalSwitchPortIP{" + mkId(port, 8) + ", " + mac + ", " + ip + "})")
+                cocoon("LogicalSwitchPortIP.put(LogicalSwitchPortIP{" + mkLPortId(port) + ", " + mac + ", " + ip + "})")
     return False
 
 def addrStr(addr):
@@ -981,11 +993,11 @@ def ovnLspSetPortSecurity(cmd):
     log('lsp-set-port-security ' + port + ' ' + ','.join(addr_strs))
     for addr in addrs:
         mac = mkMACAddr(getField(addr, 'EthAddress').value)
-        cocoon("PortSecurityMAC.put(PortSecurityMAC{" + mkId(port, 8) + ", " + mac + "})")
+        cocoon("PortSecurityMAC.put(PortSecurityMAC{" + mkLPortId(port) + ", " + mac + "})")
         subnets = map(mkIPSubnet, getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList'))
         log("subnets: " + str(subnets))
         for subnet in subnets:
-            cocoon("PortsecurityIP.put(PortSecurityIP{" + mkId(port, 8) + ", " + mac + ", " + subnet + "})")
+            cocoon("PortsecurityIP.put(PortSecurityIP{" + mkLPortId(port) + ", " + mac + ", " + subnet + "})")
     return False
 
 
@@ -1064,7 +1076,7 @@ def ovsAddBr(cmd):
         ovs_vsctl(["set", "bridge", br, "protocols=OpenFlow13,OpenFlow15"])
         hypervisor = getHyhpervisor()
         server = '"unix:' + ovs_rundir + '/' + br + '.mgmt' + '"'
-        cocoon("Chassis.put(Chassis{" + ", ".join([mkId(hypervisor, 8), "false", server, '""'])  + "})")
+        cocoon("Chassis.put(Chassis{" + ", ".join([mkChassisId(hypervisor), "false", server, '""'])  + "})")
     else:
         log("cocoon does not care about this bridge")
 
@@ -1076,7 +1088,7 @@ def ovsAddPort(cmd):
     if br == "br-int":
         hypervisor = getHyhpervisor()
         pnum = ovs_vsctl(["get", "Interface", port, "ofport"])
-        cocoon("VSwitchPort.put(VSwitchPort{" + ", ".join([mkId(port, 8), '"' + port + '"', mkId(hypervisor, 8), pnum])  + "})")
+        cocoon("VSwitchPort.put(VSwitchPort{" + ", ".join([mkVPortId(port), '"' + port + '"', mkChassisId(hypervisor), pnum])  + "})")
     else:
         log("cocoon does not care about this port")
 
@@ -1100,7 +1112,7 @@ def ovsSet(cmd):
 def ovsSetInterface(iface, e):
     (col, key, vals) = getTableEntry(e)
     if col == "external-ids" and key == "iface-id":
-        cocoon("LPortBinding.put(LPortBinding{" + mkId(vals[0], 8) + ", " + mkId(iface, 8)  + "})")
+        cocoon("LPortBinding.put(LPortBinding{" + mkLPortId(vals[0]) + ", " + mkVPortId(iface)  + "})")
 
 def ovsSetOVS(e):
     (col, key, vals) = getTableEntry(e)
@@ -1110,7 +1122,7 @@ def ovsSetOVS(e):
         vxportname = hypervisor + "-vxlan"
         ovs_vsctl(["add-port", "br-int", vxportname, "--", "set", "interface", vxportname, "type=vxlan", "options:remote_ip=flow", "options:local_ip="+vals[0], "options:key=flow"])
         pnum = ovs_vsctl(["get", "Interface", vxportname, "ofport"])
-        cocoon("TunnelPort.put(TunnelPort{" + ", ".join([mkId(hypervisor, 8), pnum, mkId(hypervisor, 8), ip]) + "})")
+        cocoon("TunnelPort.put(TunnelPort{" + ", ".join([mkTunPortId(hypervisor), pnum, mkChassisId(hypervisor), ip]) + "})")
 
 def ovsSetBridge(e):
     return
