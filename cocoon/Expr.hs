@@ -313,7 +313,7 @@ exprIsMulticast' e = exprCollect (\case
 
 exprSendsToPorts :: Refine -> Expr -> [DirPort]
 exprSendsToPorts r e = nub $ exprSendsToPorts' e ++
-                             (concatMap (maybe [] (exprSendsToPorts r) . funcDef . getFunc r) $ exprFuncsRec r e)
+                             (concatMap (maybe [] exprSendsToPorts' . funcDef . getFunc r) $ exprFuncsRec r e)
 
 exprSendsToPorts' :: Expr -> [DirPort]
 exprSendsToPorts' e = exprCollect (\case
@@ -323,7 +323,7 @@ exprSendsToPorts' e = exprCollect (\case
 
 exprSendsTo :: Refine -> Expr -> [Expr]
 exprSendsTo r e = nub $ exprSendsTo' e ++
-                        (concatMap (maybe [] (exprSendsTo r) . funcDef . getFunc r) $ exprFuncsRec r e)
+                        (concatMap (maybe [] exprSendsTo' . funcDef . getFunc r) $ exprFuncsRec r e)
 
 exprSendsTo' :: Expr -> [Expr]
 exprSendsTo' e = execState (exprTraverseM (\case
@@ -331,7 +331,11 @@ exprSendsTo' e = execState (exprTraverseM (\case
                                             _           -> return ()) e) []
 
 exprUsesRels :: Refine -> Expr -> [String]
-exprUsesRels r e = nub $ exprCollect (\case 
+exprUsesRels r e = nub $ exprUsesRels' e ++
+                         (concatMap (maybe [] exprUsesRels' . funcDef . getFunc r) $ exprFuncsRec r e)
+
+exprUsesRels' :: Expr -> [String]
+exprUsesRels' e = nub $ exprCollect (\case 
                                        EWith{..}    -> [exprTable]
                                        EAny{..}     -> [exprTable]
                                        EFor{..}     -> [exprTable]
@@ -339,7 +343,6 @@ exprUsesRels r e = nub $ exprCollect (\case
                                        EPut{..}     -> [exprTable]
                                        EDelete{..}  -> [exprTable]
                                        ERelPred{..} -> [exprRel]
-                                       EApply{..}   -> maybe [] (exprUsesRels r) $ funcDef $ getFunc r exprFunc
                                        _            -> [])
                                      (++) e
 
