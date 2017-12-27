@@ -15,6 +15,8 @@ typedef ip6_addr_t = bit<128>
 typedef ip_addr_t  = IPAddr4 {addr4 : ip4_addr_t}
                    | IPAddr6 {addr6 : ip6_addr_t}
 
+function ip4MulticastAddr(addr : ip4_addr_t) : bool = addr[31:28] == 'he
+
 typedef ip4_subnet_t = IP4Subnet { addr : ip4_addr_t
                                  , mask : ip4_addr_t }
 
@@ -47,7 +49,7 @@ typedef eth_pkt_t = EthPacket { vxlan   : vxlan_t
                               , ethtype : bit<16>
                               , payload : eth_payload_t}
 
-function pktSrcIP(p: eth_pkt_t) : ip_addr_t = 
+function pktSrcIP(p: eth_pkt_t) : opt_ip_addr_t = 
     match (p.payload) {
         EthIP4{ip4} -> SomeIPAddr{IPAddr4{ip4.src}},
         EthIP6{ip6} -> SomeIPAddr{IPAddr6{ip6.src}},

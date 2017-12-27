@@ -241,7 +241,7 @@ TunnelFromTo(from, to, toip) :- TunnelPort(_, _, to, toip), Chassis(from, _, _, 
 view LRouterNetwork ( lrouter : lrouter_id_t
                     , network : ip_subnet_t)
 
-LRouterNetwork(lrouter, network) :- LogicalRouterPort(lrport, _, lrouter, _, _ ,_ ,_), 
+LRouterNetwork(lrouter, network) :- LogicalRouterPort(lrport, _, lrouter, _, _ ,_ , _, _), 
                                     LRouterPortNetwork(lrport, network)
 
 view LRouterLBVIP ( lrouter : lrouter_id_t
@@ -274,10 +274,10 @@ view Route ( lrouter     : lrouter_id_t
 
 Route(lrouter, ip_prefix, nexthop, outport, outportmac, IPAddr4{outportip}) :- 
     LogicalRouterStaticRoute (lrouter, ip_prefix, nexthop, outport),
-    LogicalRouterPort(outport, _, _, _, outportmac, _, _),
-    LRouterPortNetwork(outport, IP4Subnet{outportip, _})
+    LogicalRouterPort(outport, _, _, _, outportmac, _, _, _),
+    LRouterPortNetwork(outport, IPSubnet4{IP4Subnet{outportip, _}})
 
 Route(lrouter, ip_prefix, nexthop, outport, outportmac, IPAddr6{outportip}) :- 
     LogicalRouterStaticRoute (lrouter, ip_prefix, nexthop, outport),
-    LogicalRouterPort(outport, _, _, _, outportmac, _, _),
-    LRouterPortNetwork(outport, IP6Subnet{outportip, _})
+    LogicalRouterPort(outport, _, _, _, outportmac, _, _, _),
+    LRouterPortNetwork(outport, IPSubnet6{IP6Subnet{outportip, _}})

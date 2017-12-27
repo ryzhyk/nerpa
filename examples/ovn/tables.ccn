@@ -572,6 +572,14 @@ typedef lrouter_port_id_t = bit<64>
 typedef lrouter_port_type_t = LRPRegular
                             | LRPGateway { redirectChassis : chassis_id_t }
 
+function rportIsGW(t : lrouter_port_type_t) : bool = {
+    match(t) {
+        LRPGateway{_} -> true,
+        _             -> false
+    }
+}
+
+
 typedef opt_peer_t = NoPeer
                    | SomePeer { peer : lrouter_port_id_t }
 
@@ -582,6 +590,7 @@ table LogicalRouterPort ( id      : lrouter_port_id_t
                         , mac     : mac_addr_t
                         , enabled : bool
                         , peer    : opt_peer_t
+                        , ct_zone : ct_zone_t
                         , primary key (id)
                         , unique (lrouter, name)
                         , unique (mac)
@@ -648,16 +657,16 @@ table NAT ( lrouter      : lrouter_id_t
           , ntype        : nat_type_t
           , external_ip  : ip4_addr_t
           , external_mac : opt_mac_addr_t
-          , logical_ip   : ip4_subnet_t
+          , logical_ip   : ip4_subnet_t // XXX: what is the meaning of the subnet mask here?
           , logical_port : opt_lport_id_t
           , foreign key (lrouter) references LogicalRouter(id) 
-          , foreign key (logical_port.lport) references LogicalSwitchPort(id))
+          , foreign key (logical_port.id) references LogicalSwitchPort(id))
 
 // MAC addresses learned by the router
-state table LearnedAddresses ( rport : lrouter_port_id_t
-                             , ip    : ip_addr_t
-                             , mac   : mac_addr_t
-                             , foreign key (rport) references LogicalRouterPort(id) )
+state table LearnedAddress ( rport : lrouter_port_id_t
+                           , ip    : ip_addr_t
+                           , mac   : mac_addr_t
+                           , foreign key (rport) references LogicalRouterPort(id) )
 
 /* DHCP_Options TABLE
        OVN implements native DHCPv4 support which caters to the common use case of providing an IPv4 address to a booting instance by providing stateless replies to
