@@ -639,10 +639,17 @@ ctxAssignsFullVar cfg v ctx | isActCtx ctx   =
 ctxAssignsFullVar _ _ _  = False
 
 ctxLiveVars :: Pipeline -> CFGCtx -> [VarName]
-ctxLiveVars Pipeline{..} ctx = filter live $ M.keys plVars
+ctxLiveVars Pipeline{..} ctx =
+    case ctx of
+         -- the first clause is needed to make sure that different
+         -- inputs are assigned to differrent registers in case the pipeline has not
+         -- been optimized and has some unused inputs
+         CtxNode nd | nd == plEntryNode -> nub $ (filter live $ M.keys plVars) ++ concatMap exprVars plInputs
+         _                              -> filter live $ M.keys plVars
     where 
     -- forward search for locations that use the variable, aborting when the variable is assigned
-    live var = not $ null $ ctxSearchForward plCFG ctx (elem var . ctxRHSVars plCFG) (ctxAssignsFullVar plCFG var)
+    live var = (elem var $ ctxRHSVars plCFG ctx)
+               || (not $ null $ ctxSearchForward plCFG ctx (elem var . ctxRHSVars plCFG) (ctxAssignsFullVar plCFG var))
 
 -- Internal compiler data structures.  Exported here for use in
 -- Builtins.hs
