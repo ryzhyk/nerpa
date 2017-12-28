@@ -62,7 +62,7 @@ maxOFTables = 255
 -- generated for any-queries.  Maps a set of columns in a relation to
 -- the set of valuations of this column in the database, the number of times 
 -- each valuation occurs and the group number assigned to it.
-type NodeRuntimeState = M.Map [I.Expr] (O.GroupId, M.Map I.Record O.BucketId)
+type NodeRuntimeState = M.Map [I.Expr] (O.GroupId, M.Map I.Record (O.BucketId, Integer))
 type SwRuntimeState = (M.Map I.NodeId NodeRuntimeState, O.GroupId)
 type Groups = M.Map SwitchId SwRuntimeState
 
@@ -92,10 +92,18 @@ assignTables pls = foldl' (\(start, pls') (n,pl) -> let (start', pl') = relabel 
                                                     in (start', pls' ++ [(n, pl')])) (1, []) pls
     where 
     relabel :: Int -> I.Pipeline -> (Int, I.Pipeline)
-    relabel start pl = (start + length ordered, pl{I.plCFG = cfg', I.plEntryNode = start})
+    relabel start pl = (start + length ordered', pl{I.plCFG = cfg', I.plEntryNode = start})
         where
         ordered = G.topsort $ I.plCFG pl
-        rename nd = (fromJust $ findIndex (nd==) ordered) + start
+        -- allocate extra table for nodes that send to group
+        ordered' = foldl' (\ordered_ nd -> 
+                            case fromJust $ G.lab (I.plCFG pl) nd of
+                                 I.Fork{}                               -> ordered_ ++ [Just nd, Nothing]
+                                 I.Par bbs    | length bbs > 1          -> ordered_ ++ [Just nd, Nothing]
+                                 I.Lookup{..} | nodeSelection == I.Rand -> ordered_ ++ [Just nd, Nothing]
+                                 _                                      -> ordered_ ++ [Just nd]) 
+                   [] ordered
+        rename nd = (fromJust $ findIndex ((Just nd) ==) ordered') + start
         bbrename (I.BB as (I.Goto nd)) = I.BB as $ I.Goto $ rename nd
         bbrename bb                    = bb
         cfg' = G.buildGr
@@ -108,37 +116,40 @@ assignTables pls = foldl' (\(start, pls') (n,pl) -> let (start', pl') = relabel 
 
 -- New switch event
 --   Store the list of tables this switch depends on
-buildSwitch :: C.Refine -> B.StructReify -> RuntimeState -> (String, IRSwitch) -> I.DB -> SwitchId -> ([O.Command], RuntimeState)
-buildSwitch r structs s ir db swid = (table0 : (staticcmds ++ updcmds), s')
+buildSwitch :: C.Refine -> B.StructReify -> O.Field -> RuntimeState -> (String, IRSwitch) -> I.DB -> SwitchId -> ([O.Command], RuntimeState)
+buildSwitch r structs idxfield s ir db swid = (table0 : (staticcmds ++ updcmds), s')
     where
     table0 = O.AddFlow 0 $ O.Flow 0 [] [O.ActionDrop]
     -- Configure static part of the pipeline
     staticcmds = let ?r = r 
                      ?structs = structs
                      ?ir = ir
+                     ?idxfield = idxfield
                  in concatMap (\(plname, pl) -> concatMap (mkNode plname) $ G.labNodes $ I.plCFG pl) $ M.toList $ snd ir
     -- Configure dynamic part from primary tables
-    (updcmds, s') = updateSwitch r structs (M.insert swid (M.empty,0) s) ir swid (M.map (map (True,)) db)
+    (updcmds, s') = updateSwitch r structs idxfield (M.insert swid (M.empty,0) s) ir swid (M.map (map (True,)) db)
 
-updateSwitch :: C.Refine -> B.StructReify -> RuntimeState -> (String, IRSwitch) -> SwitchId -> I.Delta -> ([O.Command], RuntimeState)
-updateSwitch r structs s ir swid db = (portcmds ++ nodecmds, M.insert swid ssw' s')
+updateSwitch :: C.Refine -> B.StructReify -> O.Field -> RuntimeState -> (String, IRSwitch) -> SwitchId -> I.Delta -> ([O.Command], RuntimeState)
+updateSwitch r structs idxfield s ir swid db = (portcmds ++ nodecmds, M.insert swid ssw' s')
     where
     s' = M.alter (Just . maybe (M.empty,0) id) swid s
     -- update table0 if ports have been added or removed
     portcmds = let ?r = r 
                    ?structs = structs
                    ?ir = ir
+                   ?idxfield = idxfield
                in concatMap (\(pname, pl) -> updatePort pname pl swid db) $ filter (isJust . lookupPort r . fst) $ M.toList $ snd ir
     -- update pipeline nodes
     (nodecmds, ssw') = let ?r = r 
                            ?structs = structs 
-                           ?ir = ir in
+                           ?ir = ir 
+                           ?idxfield = idxfield in
                        let (cmds, ssw) = runState (mapM (\(pname, pl) -> (liftM concat) $ mapM (updateNode db pname pl swid) 
                                                                                         $ G.labNodes $ I.plCFG pl) $ M.toList $ snd ir) 
                                                   (s' M.! swid)
                        in (concat cmds, ssw)
 
-updatePort :: (?r::C.Refine, ?structs::B.StructReify) => String -> I.Pipeline -> SwitchId -> I.Delta -> [O.Command]
+updatePort :: (?r::C.Refine, ?structs::B.StructReify, ?idxfield::O.Field) => String -> I.Pipeline -> SwitchId -> I.Delta -> [O.Command]
 updatePort pname pl i db = delcmd ++ addcmd
     where
     prel = name $ C.portRel $ C.getPort ?r pname
@@ -148,19 +159,23 @@ updatePort pname pl i db = delcmd ++ addcmd
     delcmd = concatMap (\(_,f) -> map (O.DelFlow 0 1) $ match f) del
     addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [O.ActionGoto $ I.plEntryNode pl]) $ match f) add
 
-mkNode :: (?r::C.Refine, ?structs::B.StructReify, ?ir::(String, IRSwitch)) => String -> (I.NodeId, I.Node) -> [O.Command]
+mkNode :: (?r::C.Refine, ?structs::B.StructReify, ?ir::(String, IRSwitch), ?idxfield::O.Field) => String -> (I.NodeId, I.Node) -> [O.Command]
 mkNode plname (nd, node) = {-trace ("mkNode " ++ show nd) $-}
     case node of
          I.Par [b]                   -> [ O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB plname nd 0 b ]
-         I.Par bs                    -> [ O.AddGroup $ O.Group nd O.GroupAll $ mapIdx (\b i -> O.Bucket Nothing $ mkStaticBB plname nd i b) bs 
-                                        , O.AddFlow nd $ O.Flow 0 [] [O.ActionGroup nd] ]
+         I.Par bs                    -> [ O.AddGroup 
+                                          $ O.Group nd O.GroupAll 
+                                          $ mapIdx (\_ i -> O.Bucket Nothing [O.ActionSet (O.EField ?idxfield $ Just (31,0)) (O.EVal $ O.Value 32 $ toInteger i), O.ActionResubmit (nd+1)]) bs 
+                                        , O.AddFlow nd $ O.Flow 0 [] $ mkGroupAction nd ] ++
+                                        mapIdx (\b i -> O.AddFlow (nd+1) $ O.Flow 0 [O.Match ?idxfield (Just 0xffffffff) $ toInteger i] 
+                                                                                  $ mkStaticBB plname nd i b) bs
          I.Cond cs                   -> mapIdx (\(m, a) i -> O.AddFlow nd $ O.Flow i m a) 
                                                $ reverse $ mkCond $ mapIdx (\(c,b) i -> (c, mkStaticBB plname nd i b)) cs
          I.Lookup _ _ _ _ el I.First -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB plname nd 1 el]
          I.Lookup _ _ _ _ el I.Rand  -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB plname nd 1 el]
          I.Fork{}                    -> []
 
-updateNode :: (?r::C.Refine, ?structs::B.StructReify, ?ir::(String, IRSwitch)) => I.Delta -> String -> I.Pipeline -> SwitchId -> (I.NodeId, I.Node) -> State SwRuntimeState [O.Command]
+updateNode :: (?r::C.Refine, ?structs::B.StructReify, ?ir::(String, IRSwitch), ?idxfield::O.Field) => I.Delta -> String -> I.Pipeline -> SwitchId -> (I.NodeId, I.Node) -> State SwRuntimeState [O.Command]
 updateNode db plname portpl swid (nd, node) = {-trace ("updateNode " ++ show nd) $-}
     case node of
          I.Par _                      -> return []
@@ -198,16 +213,16 @@ updateNode db plname portpl swid (nd, node) = {-trace ("updateNode " ++ show nd)
         let (g, bkts) = case M.lookup vals s of
                              Nothing -> error $ "entry " ++ show vals ++ " not found. node: " ++ show nd
                              Just x  -> x
-        let bid = case M.lookup f' bkts of
-                       Nothing -> error $ "bucket  " ++ show f' ++ " not found" 
-                       Just x  -> x
+        let (bid, idx) = case M.lookup f' bkts of
+                              Nothing -> error $ "bucket  " ++ show f' ++ " not found" 
+                              Just x  -> x
         let bkts' = M.delete f' bkts
         -- update counter in s M.! val; if the counter drops to 0, delete group and flow entries
         let s' = M.update (\(gid, _) -> Just (gid, bkts')) vals s
         let grcmds = if M.size bkts' == 0
                         then (O.DelGroup g) :
                              (map (\O.Flow{..} -> O.DelFlow nd flowPriority flowMatch)
-                                  $ mkLookupFlow plname nd f (snd $ I.nodePL node) $ Right [O.ActionGroup g])
+                                  $ mkLookupFlow plname nd f (snd $ I.nodePL node) $ Right $ mkGroupAction g)
                         else []
         -- remove empty group
         s'' <- if M.size bkts' == 0
@@ -215,8 +230,9 @@ updateNode db plname portpl swid (nd, node) = {-trace ("updateNode " ++ show nd)
                           return $ M.delete vals s'
                   else return s'
         putNode nd s''
-        let delcmd = O.DelBucket g bid
-        return $ grcmds ++ [delcmd]
+        let delcmd = [ O.DelBucket g bid
+                     , O.DelFlow (nd+1) 1 [O.Match ?idxfield (Just 0xffffffff) idx] ]
+        return $ grcmds ++ delcmd
 
     addGroup :: O.GroupType -> C.Expr -> State SwRuntimeState [O.Command]
     addGroup gt f = do
@@ -237,16 +253,20 @@ updateNode db plname portpl swid (nd, node) = {-trace ("updateNode " ++ show nd)
         let g = fst $ s' M.! vals
         let grcmds = if M.size (snd $ s' M.! vals) == 0
                         then (O.AddGroup $ O.Group g gt []) :
-                             (map (O.AddFlow nd) $ mkLookupFlow plname nd f (snd $ I.nodePL node) $ Right [O.ActionGroup g])
+                             (map (O.AddFlow nd) $ mkLookupFlow plname nd f (snd $ I.nodePL node) $ Right $ mkGroupAction g)
                         else []
         -- allocate bucket id
-        let bid = case M.elems $ snd $ s' M.! vals of
+        let bid = case map fst $ M.elems $ snd $ s' M.! vals of
                        []    -> 0
                        bids  -> maximum bids + 1
-        let s'' = M.update (\(gid,bkts) -> Just (gid, M.insert f' bid bkts)) vals s'
-        let addcmd = O.AddBucket g $ O.Bucket (Just bid) $ mkBB plname nd 0 f bb
+        let idx = case map snd $ concatMap (M.elems . snd) $ M.elems s' of
+                       []    -> 0
+                       inds  -> maximum inds + 1
+        let s'' = M.update (\(gid,bkts) -> Just (gid, M.insert f' (bid, idx) bkts)) vals s'
+        let addcmd = [ O.AddBucket g $ O.Bucket (Just bid) [O.ActionSet (O.EField ?idxfield (Just (31,0))) (O.EVal $ O.Value 32 idx), O.ActionResubmit (nd+1)]
+                     , O.AddFlow (nd+1) $ O.Flow 1 [O.Match ?idxfield (Just 0xffffffff) idx] $ mkBB plname nd 0 f bb]
         putNode nd s''
-        return $ grcmds ++ [addcmd]
+        return $ grcmds ++ addcmd
 
     -- Group id allocator -- just keep incrementing for now
     -- TODO: implement real allocator
@@ -265,6 +285,9 @@ updateNode db plname portpl swid (nd, node) = {-trace ("updateNode " ++ show nd)
 
     putNode :: I.NodeId -> NodeRuntimeState -> State SwRuntimeState ()
     putNode n s = modify (\(m, g) -> (M.insert n s m, g))
+
+mkGroupAction :: (?idxfield::O.Field) => O.GroupId -> [O.Action]
+mkGroupAction gid = [O.ActionGroup gid]
 
 {-
 getBucketId :: (?r::C.Refine) => String -> C.Expr -> O.BucketId
@@ -286,7 +309,6 @@ mkStaticBB plname nd i b = mkBB plname nd i (error "IR2OF.mkStaticBB requesting 
 
 mkBB :: (?r::C.Refine, ?structs::B.StructReify, ?ir::(String, IRSwitch)) => String -> I.NodeId -> Int -> C.Expr -> I.BB -> [O.Action]
 mkBB plname nd i val (I.BB as n) = map (mkAction ival) as ++ mkNext plname nd i ival n
-
     where ival = I.val2Record ?r ?structs (C.exprConstructor $ C.enode val) val
 
 mkAction :: I.Record -> I.Action -> O.Action

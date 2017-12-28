@@ -398,6 +398,7 @@ bbCols (BB as nxt) = nub $ concatMap actionCols as ++ nextCols nxt
 
 data Selection = First
                | Rand
+               deriving (Eq)
 
 type FPipeline = C.Expr -> Pipeline
 

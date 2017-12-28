@@ -59,13 +59,17 @@ newOVSBackend = do
 ovsPrecompile :: (MonadError String me) => FilePath -> Refine -> me OF.IRSwitches
 ovsPrecompile workdir r = OF.precompile ovsStructReify workdir r ovsRegFile
 
+-- register used to store bucket index in the OF pipeline
+ovsIdxField :: OF.Field
+ovsIdxField = OF.Field "metadata" 64
+
 ovsBuildSwitch :: IORef OF.RuntimeState -> FilePath -> Refine -> Switch -> DL.Fact -> OF.IRSwitches -> IR.DB -> IO ()
 ovsBuildSwitch ref workdir r sw f@(DL.Fact rname _) ir db = do
     s <- readIORef ref
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        (cmds, s') = OF.buildSwitch r ovsStructReify s (name sw, ir M.! name sw) db swid
+        (cmds, s') = OF.buildSwitch r ovsStructReify ovsIdxField s (name sw, ir M.! name sw) db swid
     ovsResetSwitch workdir r sw f
     sendCmds workdir rname swid swaddr swname cmds
     writeIORef ref s'
@@ -76,7 +80,7 @@ ovsUpdateSwitch ref workdir r sw f@(DL.Fact rname _) ir delta = do
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        (cmds, s') = OF.updateSwitch r ovsStructReify s (name sw, ir M.! name sw) swid delta
+        (cmds, s') = OF.updateSwitch r ovsStructReify ovsIdxField s (name sw, ir M.! name sw) swid delta
     when (not $ null cmds) $ sendCmds workdir rname swid swaddr swname cmds
     writeIORef ref s'
 
