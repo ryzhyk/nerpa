@@ -667,6 +667,7 @@ procedure tunIngress(port: TunnelPort): sink = {
 
 procedure lrouterIngress(rpid : lrouter_port_id_t, chassis : chassis_id_t, egress_loopback : bool) : sink = {
     var rport = the (rp in LogicalRouterPort | rp.id == rpid) { rp };
+    var localGW = the (rp in LogicalRouterPort | rp.id == rpid and rp.ptype == LRPGateway{chassis}) { true } default { false };
     if (not rport.enabled) { drop };
 
     // L2 admission control
@@ -676,7 +677,7 @@ procedure lrouterIngress(rpid : lrouter_port_id_t, chassis : chassis_id_t, egres
     if (not l3AdmissionControl(rport, chassis, egress_loopback, pkt)) { drop };
 
     // ARP request and response processing
-    var bounce = rportARPReq(rport, chassis);
+    var bounce = rportARPReq(rport, chassis, localGW);
     if (bounce) {
         rportDeliver(rport, chassis)
     };
@@ -688,7 +689,7 @@ procedure lrouterIngress(rpid : lrouter_port_id_t, chassis : chassis_id_t, egres
     };
 
     // process IP packets for IP addresses owned by the router
-    rportIP(rport, chassis)
+    rportIP(rport, chassis, localGW)
 }
 
 function l2AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t, p : Packet) : bool = {
@@ -741,11 +742,11 @@ function l3AdmissionControl(rport : LogicalRouterPort, chassis : chassis_id_t, e
 
 
 // Returns true iff the packet must be bounced back to the sender
-procedure rportARPReq(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
+procedure rportARPReq(rport : LogicalRouterPort, chassis : chassis_id_t, localGW : bool) : bool = {
     match (pkt.payload) {
         EthARP{ARPPkt{ARPRequest, spa, tpa, sha, tha}} -> {
             the (lrn in LRouterPortNetwork | lrn.lport == rport.id and 
-                                             (rport.ptype == LRPRegular or rport.ptype == LRPGateway{chassis}) and
+                                             (rport.ptype == LRPRegular or localGW) and
                                              match (lrn.network) {
                                                  IPSubnet4{sn4} -> tpa == sn4.addr,
                                                  _              -> false 
@@ -761,7 +762,7 @@ procedure rportARPReq(rport : LogicalRouterPort, chassis : chassis_id_t) : bool 
                                       nat.external_ip == tpa and 
                                          (rport.ptype == LRPRegular or
                                           match (nat.external_mac) {
-                                              NoMACAddr -> rport.ptype == LRPGateway{chassis},
+                                              NoMACAddr -> localGW,
                                               _         -> false
                                           })) {
                         mkARPResp(rport.mac, nat.external_ip);
@@ -785,7 +786,7 @@ procedure rportARPReq(rport : LogicalRouterPort, chassis : chassis_id_t) : bool 
     }
 }
 
-procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
+procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t, localGW : bool) : sink = {
     var handled : bool;
     // IP packets that are handled locally by the router
     match (pkt.payload) {
@@ -796,7 +797,7 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t) : sink = {
         // ICMP6 NS
         EthIP6{IP6Pkt{_,_,_,_,_,src,dst,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{target, sll}}}}}} ->  {
             the (lrn in LRouterPortNetwork | lrn.lport == rport.id and 
-                                             (rport.ptype == LRPRegular or rport.ptype == LRPGateway{chassis}) and
+                                             (rport.ptype == LRPRegular or localGW) and
                                              match (lrn.network) {
                                                 IPSubnet6{sn6} -> sn6.addr == target and dst == target,
                                                 _              -> false
