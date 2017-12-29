@@ -316,7 +316,7 @@ mkAction val (I.ASet e1 e2)    = O.ActionSet (mkExpr val e1) (mkExpr val e2)
 mkAction val (I.ABuiltin f as) = O.ActionBuiltin f $ map (mkExpr val) as
 
 mkExpr :: I.Record -> I.Expr -> O.Expr
-mkExpr val e = {-trace ("mkExpr " ++ show val ++ " " ++ show e) $ -}
+mkExpr val e = {-trace ("mkExpr " ++ show val ++ " " ++ show e) $-}
     case e of
          I.EPktField f t   -> O.EField (O.Field f $ I.typeWidth t) Nothing
          I.EVar      v t   -> O.EField (O.Field v $ I.typeWidth t) Nothing
@@ -335,7 +335,8 @@ slice (O.EField f (Just (_,l0))) h l = O.EField f $ Just (l0+h, l0+l)
 slice (O.EVal (O.Value _ v))     h l = O.EVal $ O.Value (h-l) $ bitSlice v h l
 
 mkLookupFlow :: (?r::C.Refine, ?structs::B.StructReify, ?ir::(String, IRSwitch)) => String -> I.NodeId -> C.Expr -> I.FPipeline -> Either I.BB [O.Action] -> [O.Flow]
-mkLookupFlow plname nd val lpl b = {-trace ("mkLookupFlow " ++ show val ++ " " ++ show (I.plCFG $ lpl val)) $-} map (\m -> O.Flow 1 m as) matches
+mkLookupFlow plname nd val lpl b = {-trace ("mkLookupFlow " ++ show val ++ "\n" ++ show (I.plCFG $ lpl val)) $ -}
+                                   {-trace ("matches: " ++ show matches) $ -} map (\m -> O.Flow 1 m as) matches
     where
     matches = mkPLMatch $ lpl val
     as = case b of 
@@ -438,9 +439,9 @@ mkPLMatchBB :: M.Map I.Expr I.Expr -> I.Expr -> (I.Expr, I.Expr) -> I.Pipeline -
 mkPLMatchBB vars c (yes, no) pl (I.BB as nxt) = 
     let vars' = foldl' mkPLMatchAction vars as in
     case nxt of
-         I.Drop     -> (I.conj [I.EUnOp Not no, c], no)
+         I.Drop     -> (I.disj [yes, I.conj [I.EUnOp Not no, c]], no)
          I.Goto nd' -> let (yes', no') = mkPLMatchNode vars' nd' pl
-                       in (I.disj [yes, I.conj [c, yes']], I.disj [no, I.conj [c, no']])
+                       in (I.disj [yes, I.conj [I.EUnOp Not no, c, yes']], I.disj [no, c])
          _          -> error ""
 
 mkPLMatchAction :: M.Map I.Expr I.Expr -> I.Action -> M.Map I.Expr I.Expr
@@ -477,6 +478,7 @@ mkSimpleCond' c =
          I.EUnOp Not (I.EUnOp Not e) -> mkSimpleCond' e
          I.EBool False               -> []
          I.EBool True                -> [[]]
+         e | I.exprType e == I.TBit 1-> mkSimpleCond' (I.EBinOp Eq e (I.EBit 1 1))
          _                           -> error $ "IR2OF.mkSimpleCond': expression is not supported: " ++ show c
 
 concatMatches :: [O.Match] -> [O.Match] -> Maybe [O.Match]
