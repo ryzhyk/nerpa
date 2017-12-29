@@ -101,7 +101,9 @@ Value
 ;
 
 SimpleValue
-: /([^,' \r\n])+/
+: /([^,'" \r\n])+/
+| /'[^']*'/
+| /"[^"]*"/
 ;
 
 OptKey
@@ -112,6 +114,7 @@ OptKey
 
 Address
 : "'" EthAddress IpAddressList "'"
+| '"' EthAddress IpAddressList '"'
 | EthAddress IpAddressList
 | "unknown"
 | "dynamic"
@@ -262,6 +265,14 @@ Number
 | /0x[0-9a-fA-F]+/
 ;
 
+Set
+: "--if-exists"? "set" Table Record TableEntry+
+;
+
+Record
+: "."
+| Identifier
+;
 """
 
 ovnGrammar = commonGrammar + r"""
@@ -271,11 +282,32 @@ GlobalOption
 
 Options_command_args
 : EMPTY
-| "init"
+| OptionsCommandList
+;
+
+OptionsCommandList
+: FirstCommand
+| FirstCommand SeparatedCommandsList
+;
+
+FirstCommand
+: "--" OptionsCommand
+| OptionsCommand
+;
+
+SeparatedCommandsList
+: EMPTY
+| "--" OptionsCommand SeparatedCommandsList
+;
+
+OptionsCommand
+: "init"
 | "show" Switch?
 | LsAdd
 | LsDel
 | LsList
+| LrAdd
+| LrpAdd
 | AclAdd
 | AclDel
 | AclList
@@ -285,6 +317,7 @@ Options_command_args
 | LspSetPortSecurity
 | LspSetAddresses
 | Create
+| Set
 ;
 
 Create
@@ -359,6 +392,20 @@ AclAddOption
 Direction
 : "from-lport"
 | "to-lport"
+;
+
+LrAdd
+: LrAddOption "lr-add" Router?
+;
+
+LrAddOption
+: EMPTY
+| "--may-exist"
+| "--add-duplicate"
+;
+
+LrpAdd
+: "--may-exist"? "lrp-add" Router Port Address
 ;
 
 LsAdd
@@ -486,19 +533,17 @@ IdAt
 : "--id=@" Identifier
 ;
 
-Set
-: "--if-exists"? "set" Table Record TableEntry+
-;
-
-Record
-: "."
-| Identifier
-;
 """
 
 valGrammar = """
 Vals
 : Value
+;
+""" + ovnGrammar
+
+addressGrammar = """
+Addr
+: Address
 ;
 """ + ovnGrammar
 
@@ -515,7 +560,12 @@ def getValueParser():
     g = parglare.Grammar.from_string(valGrammar)
     return parglare.Parser(g, build_tree=True)
 
+def getAddressParser():
+    g = parglare.Grammar.from_string(addressGrammar)
+    return parglare.Parser(g, build_tree=True)
+
 val_parser = getValueParser()
+addr_parser = getAddressParser()
 
 def cocoon(cmd):
     log("cocoon command: " + cmd)
@@ -822,10 +872,16 @@ def mkVPortId(vname):
     return mkId(vname, 8)
 
 def mkLPortId(lpname):
-    return mkId(lpname, 8)
+    return mkId(lpname[:8], 8)
 
 def mkSwId(swname):
     return mkId(swname[-3:], 8)
+
+def mkRtId(rname):
+    return mkId(rname, 8)
+
+def mkRPortId(pname):
+    return mkId(pname[-4:], 4)
 
 def mkId(name, w):
     if len(name) > w:
@@ -856,11 +912,16 @@ def mkAddress(addr):
 def mkIPSubnet(ip):
     net = netaddr.IPNetwork(ip.children[0].children[0].value)
     if ip.children[0].symbol.name == 'Ipv4Address':
-        return "IPSubnet4{IP4Subnet{32'h%x/%d}}" % (net.ip, net.prefixlen)
+        return "IPSubnet4{IP4Subnet{32'h%x,%d}}" % (net.ip, net.prefixlen)
     elif ip.children[0].symbol.name == 'Ipv6Address':
-        return "IPSubnet6{IP6Subnet{128'h%x/%d}}" % (net.ip, net.prefixlen)
+        return "IPSubnet6{IP6Subnet{128'h%x,%d}}" % (net.ip, net.prefixlen)
     else:
         raise Exception("not implemented: mkIPSubnet " + ip.children[0].symbol.name)
+
+def mkMACIPs(addr):
+    mac = mkMACAddr(getField(addr, 'EthAddress').value)
+    subnets = map(mkIPSubnet, getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList'))
+    return (mac, subnets)
 
 def getTableEntry(entry):
     col = getField(entry, 'Column').children[0].value
@@ -868,7 +929,7 @@ def getTableEntry(entry):
     key = None
     if len(okey.children) == 2:
         key = okey.children[1].value
-    vals = map(lambda x: x.value, getList(getField(entry, 'Value'), 'SimpleValue', 'Value'))
+    vals = map(lambda x: x.children[0].value, getList(getField(entry, 'Value'), 'SimpleValue', 'Value'))
     return (col, key, vals)
 
 def formatTableEntry(e):
@@ -881,7 +942,24 @@ def formatTableEntry(e):
     return col + skey + '=' + ",".join(vals)
 
 def getOptField(node, field, default):
-    return next((x for x in node.children if x.symbol.name == field), default)
+    for x in node.children:
+        if x.symbol.name == field:
+            return x
+    return None
+
+def allocZone():
+    store = PersistentStore(storefile)
+    z = 0
+    try:
+        z = store.get("_last_zone_id")
+        if z == 32766:
+            z = 0
+    except:
+        pass
+    z = z+1
+    store.set("_last_zone_id", z)
+    store.close()
+    return z
 
 def impersonateOVN(line):
     parser = getOvnParser()
@@ -889,38 +967,58 @@ def impersonateOVN(line):
     try:
         options = parseOptions(parser, line)
     except parglare.exceptions.ParseError as e:
-        print "error parsing:", line, str(e)
+        print "impersonateOVN: error parsing:", line, str(e)
         raise e
 
     log('\novn-nbctl' + line)
     log(options.tree_str())
-    cmd = ovnGetCommand(options)
-    if cmd == None:
-        log('no command, ignoring')
-    else:
+    cmds = getCommands(options)
+    for cmd in cmds:
         log('command symbol: ' + cmd.symbol.name)
         if cmd.symbol.name in ovnHandlers:
-            return ovnHandlers[cmd.symbol.name](cmd)
+            ovnHandlers[cmd.symbol.name](cmd)
         else:
             log('unknown command, ignoring')
 
-def ovnGetCommand(options):
-    args = getField(options, 'Options_command_args')
-    if len(args.children) == 0:
-        return None
+def getCommands(options):
+    cmds = getField(options, 'Options_command_args')
+    if len(cmds.children) == 0:
+        return []
     else:
-        return args.children[0]
+        first = getField(getField(cmds.children[0], 'FirstCommand'), 'OptionsCommand').children[0]
+        rest = []
+        lst = getOptField(cmds.children[0], 'SeparatedCommandsList', None)
+        if lst != None:
+            rest = map(lambda x: x.children[0], getList(lst, 'OptionsCommand', 'SeparatedCommandsList'))
+        return [first] + rest
+
 
 def ovnInit(cmd):
     log('init: nothing to do here')
-    return False
 
+def ovnLrAdd(cmd):
+    ropt = getField(cmd, 'Router_opt')
+    rname = getField(ropt, 'Router').children[0].value
+    log('adding router ' + rname)
+    cocoon('LogicalRouter.put(LogicalRouter{' + mkRtId(rname) + ', true, "' + rname + '", RouterRegular})')
+
+def ovnLrpAdd(cmd):
+    rt = getField(cmd, 'Router').children[0].value
+    port = getField(cmd, 'Port').children[0].value
+    addr = getField(cmd, 'Address')
+    addr_str = addrStr(addr)
+    (mac, subnets) = mkMACIPs(addr)
+    zone = allocZone()
+    cocoon('LogicalRouterPort.put(LogicalRouterPort{' +
+             ', '.join([mkRPortId(port), '"' + port + '"', mkRtId(rt), 'LRPRegular', mac, 'true', 'NoPeer', str(zone)]) + '})')
+    for subnet in subnets: 
+        cocoon('LRouterPortNetwork.put(LRouterPortNetwork{' + ', '.join([mkRPortId(port), subnet]) + '})')
+   
 def ovnLsAdd(cmd):
     swopt = getField(cmd, 'Switch_opt')
     swname = getField(swopt, 'Switch').children[0].value
     log('adding switch ' + swname)
     cocoon('LogicalSwitch.put(LogicalSwitch{' + mkSwId(swname) + ', LSwitchRegular, "' + swname + '", NoSubnet})')
-    return False
 
 def ovnLspAdd(cmd):
     sw = getField(cmd, 'Switch').children[0].value
@@ -934,18 +1032,18 @@ def ovnLspAdd(cmd):
         raise Exception('not implemented: VIF ports')
     else:
         log('adding switch port ' + sw + ' ' + port)
-        # XXX: hack: we currently don't have a way to generate unique zone id's
-        zone = port.translate(None, string.ascii_letters)
+        zone = allocZone()
         cocoon('LogicalSwitchPort.put(LogicalSwitchPort{' +
-                 ', '.join([mkLPortId(port), mkSwId(sw), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', zone]) + '})')
-    return False
+                 ', '.join([mkLPortId(port), mkSwId(sw), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', str(zone)]) + '})')
 
 def ovnLspSetAddresses(cmd):
     port = getField(cmd, 'Port').children[0].value
     addrs = getList(getField(cmd, 'Addresses'), 'Address', 'Addresses')
     addr_strs = map(addrStr, addrs)
     log('adding switch port addresses ' + port + ' ' + ','.join(addr_strs))
+    doOvnLspSetAddresses(port, addrs)
 
+def doOvnLspSetAddresses(port, addrs):
     cocoon("{LogicalSwitchPortMAC.delete(?.lport==" + mkLPortId(port) + "); LogicalSwitchPortIP.delete(?.lport==" + mkLPortId(port) + ")}")
     for addr in addrs:
         addrtype = addr.children[0].symbol.name
@@ -965,7 +1063,6 @@ def ovnLspSetAddresses(cmd):
             log("ips: " + str(ips))
             for ip in ips:
                 cocoon("LogicalSwitchPortIP.put(LogicalSwitchPortIP{" + mkLPortId(port) + ", " + mac + ", " + ip + "})")
-    return False
 
 def addrStr(addr):
     if addr.children[0].symbol.name == "unknown":
@@ -992,14 +1089,11 @@ def ovnLspSetPortSecurity(cmd):
     #for addr in addrs:
     log('lsp-set-port-security ' + port + ' ' + ','.join(addr_strs))
     for addr in addrs:
-        mac = mkMACAddr(getField(addr, 'EthAddress').value)
+        (mac, subnets) = mkMACIPs(addr) 
         cocoon("PortSecurityMAC.put(PortSecurityMAC{" + mkLPortId(port) + ", " + mac + "})")
-        subnets = map(mkIPSubnet, getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList'))
         log("subnets: " + str(subnets))
         for subnet in subnets:
             cocoon("PortsecurityIP.put(PortSecurityIP{" + mkLPortId(port) + ", " + mac + ", " + subnet + "})")
-    return False
-
 
 def ovnAclAdd(cmd):
     sw        = getField(cmd, 'Switch').children[0].value
@@ -1009,7 +1103,6 @@ def ovnAclAdd(cmd):
     verdict   = mkVerdict(getField(cmd, 'Verdict').children[0].value)
     log('acl-add ' + ' '.join([sw, direction, prio, match, verdict]))
     cocoon("ACL.put(ACL{" + ", ".join([mkSwId(sw), prio, direction, "\\(p:Packet, lp:lport_id_t): bool =" + match, verdict])  + "})")
-    return False
 
 def ovnCreate(cmd):
     table = getField(cmd, 'Table').children[0].value
@@ -1022,7 +1115,25 @@ def ovnCreate(cmd):
         store.set(key, vals)
         store.close()
     log('create ' + table + ' ' + ' '.join(map(formatTableEntry, entries)))
-    return False
+
+def ovnSet(cmd):
+    table = getField(cmd, 'Table').children[0].value
+    record = getField(cmd, 'Record').children[0].value
+    entries = getList(getField(cmd, 'TableEntry_1'), 'TableEntry', 'TableEntry_1')
+    log("set " + table + ' ' + record + ' ' + ' '.join(map(formatTableEntry, entries)))
+    if table == "Logical_Switch_Port":
+        ovnSetLSP(record, entries)
+
+def ovnSetLSP(port, entries):
+    d = dict(map(lambda x: ((x[0], x[1]), x[2]), map(getTableEntry, entries)))
+    if ('type', None) in d:
+        if d[('type', None)] == ['router']:
+            if ('options', 'router-port') in d:
+                rp = d[('options', 'router-port')][0]
+                cocoon("the (lp in LogicalSwitchPort | lp.id == " + mkLPortId(port)+ ") {LogicalSwitchPort.delete(?.id == lp.id); lp.ptype=LPortRouter{" + mkRPortId(rp) + "}; LogicalSwitchPort.put(lp)}")
+    if ('addresses', None) in d:
+        addrs = map(lambda x: addr_parser.parse(x).children[0], d[('addresses', None)])
+        doOvnLspSetAddresses(port, addrs)
 
 ovnHandlers = { 'init'               : ovnInit
               , 'LsAdd'              : ovnLsAdd
@@ -1031,6 +1142,9 @@ ovnHandlers = { 'init'               : ovnInit
               , 'LspSetPortSecurity' : ovnLspSetPortSecurity
               , 'AclAdd'             : ovnAclAdd
               , 'Create'             : ovnCreate
+              , 'LrAdd'              : ovnLrAdd
+              , 'LrpAdd'             : ovnLrpAdd
+              , 'Set'                : ovnSet
               }
 
 def impersonateOVS(line):
@@ -1038,29 +1152,18 @@ def impersonateOVS(line):
     try:
         options = parseOptions(parser, line)
     except parglare.exceptions.ParseError as e:
-        print impersonate, "error parsing", "`" + line + "'", str(e)
+        print "impersonateOVS: error parsing", "`" + line + "'", str(e)
+        return ()
     log('\novs-vsctl' + line)
     log(options.tree_str())
-    cmds = ovsGetCommands(options)
+    cmds = getCommands(options)
     for cmd in cmds:
-        cmdname = cmd.children[0].symbol.name
+        cmdname = cmd.symbol.name
         log('command symbol: ' + cmdname)
         if cmdname in ovsHandlers:
-            ovsHandlers[cmdname](cmd.children[0])
+            ovsHandlers[cmdname](cmd)
         else:
             log('unknown command, ignoring')
-
-def ovsGetCommands(options):
-    cmds = getField(options, 'Options_command_args')
-    if len(cmds.children) == 0:
-        return []
-    else:
-        first = getField(getField(cmds.children[0], 'FirstCommand'), 'OptionsCommand')
-        rest = []
-        lst = getOptField(cmds.children[0], 'SeparatedCommandsList', None)
-        if lst != None:
-            rest = getList(lst, 'OptionsCommand', 'SeparatedCommandsList')
-        return [first] + rest
 
 def ovsAddBr(cmd):
     br = getField(cmd, 'Bridge').children[0].value
