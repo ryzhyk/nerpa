@@ -57,6 +57,12 @@ data Match = Match { matchField :: Field
                    , matchVal   :: Integer
                    }
 
+instance PP Match where
+    pp Match{..} = pp matchField <> "=" <> pp matchVal <> maybe empty (("/" <>) . pp) matchMask
+
+instance Show Match where
+    show = render . pp
+
 data Expr = EField Field (Maybe (Int, Int))
           | EVal   Value
             
