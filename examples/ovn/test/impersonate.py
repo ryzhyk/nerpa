@@ -910,11 +910,26 @@ def mkAddress(addr):
         raise Exception("unknown address format " + addr)
 
 def mkIPSubnet(ip):
-    net = netaddr.IPNetwork(ip.children[0].children[0].value)
+    netmask = getOptField(getField(ip.children[0], "Netmask_opt"), "Netmask", None)
+    log("ip.children[0] label:" + ip.children[0].symbol.name)
+    if netmask != None:
+        log("netmask")
+        log("mask:" + getField(netmask, "Number").children[0].value)
+        subnet = ip.children[0].children[0].value + "/" + getField(netmask, "Number").children[0].value
+    else:
+        log("no netmask")
+        subnet = ip.children[0].children[0].value
+    net = netaddr.IPNetwork(subnet)
     if ip.children[0].symbol.name == 'Ipv4Address':
-        return "IPSubnet4{IP4Subnet{32'h%x,%d}}" % (net.ip, net.prefixlen)
+        mask = 0
+        for i in range(32-int(net.prefixlen), 32):
+            mask = mask + (1 << i)
+        return "IPSubnet4{IP4Subnet{32'h%x,32'h%x}}" % (net.ip, mask)
     elif ip.children[0].symbol.name == 'Ipv6Address':
-        return "IPSubnet6{IP6Subnet{128'h%x,%d}}" % (net.ip, net.prefixlen)
+        mask = 0
+        for i in range(128-int(net.prefixlen), 128):
+            mask = mask + (1 << i)
+        return "IPSubnet6{IP6Subnet{128'h%x,128'h%x}}" % (net.ip, mask)
     else:
         raise Exception("not implemented: mkIPSubnet " + ip.children[0].symbol.name)
 
