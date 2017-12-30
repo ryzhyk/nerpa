@@ -1,5 +1,8 @@
 typedef mac_addr_t = bit<48>
 
+typedef opt_mac_addr_t = SomeMACAddr { addr : mac_addr_t }
+                       | NoMACAddr
+
 function ethUnicastAddr(addr: mac_addr_t): bool   = addr[40:40] == 0
 function ethMulticastAddr(addr: mac_addr_t): bool = addr[40:40] == 1
 function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
@@ -15,6 +18,9 @@ typedef ip6_addr_t = bit<128>
 typedef ip_addr_t  = IPAddr4 {addr4 : ip4_addr_t}
                    | IPAddr6 {addr6 : ip6_addr_t}
 
+typedef opt_ip_addr_t = SomeIPAddr { addr : ip_addr_t }
+                      | NoIPAddr
+
 function ip4MulticastAddr(addr : ip4_addr_t) : bool = addr[31:28] == 'he
 
 typedef ip4_subnet_t = IP4Subnet { addr : ip4_addr_t
@@ -25,6 +31,9 @@ typedef ip6_subnet_t = IP6Subnet { addr : ip6_addr_t
 
 typedef ip_subnet_t = IPSubnet4 {ip4_subnet : ip4_subnet_t}
                     | IPSubnet6 {ip6_subnet : ip6_subnet_t}
+
+typedef opt_subnet_t = SomeSubnet { subnet : ip_subnet_t }
+                     | NoSubnet
 
 function ipSubnetAddr(subnet : ip_subnet_t) : ip_addr_t = 
     match (subnet) {
@@ -53,6 +62,13 @@ function pktSrcIP(p: eth_pkt_t) : opt_ip_addr_t =
     match (p.payload) {
         EthIP4{ip4} -> SomeIPAddr{IPAddr4{ip4.src}},
         EthIP6{ip6} -> SomeIPAddr{IPAddr6{ip6.src}},
+        _           -> NoIPAddr
+    }
+
+function pktDstIP(p: eth_pkt_t) : opt_ip_addr_t = 
+    match (p.payload) {
+        EthIP4{ip4} -> SomeIPAddr{IPAddr4{ip4.dst}},
+        EthIP6{ip6} -> SomeIPAddr{IPAddr6{ip6.dst}},
         _           -> NoIPAddr
     }
 

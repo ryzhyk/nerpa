@@ -1,15 +1,5 @@
 include(`packet.ccn')
 
-typedef opt_subnet_t = SomeSubnet { subnet : ip_subnet_t }
-                     | NoSubnet
-
-typedef opt_ip_addr_t = SomeIPAddr { addr : ip_addr_t }
-                      | NoIPAddr
-
-typedef opt_mac_addr_t = SomeMACAddr { addr : mac_addr_t }
-                       | NoMACAddr
-
-
 typedef lswitch_type_t = LSwitchRegular
                        | LSwitchBridged
 

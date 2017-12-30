@@ -271,17 +271,25 @@ NATChassis(lrouter, ntype, external_ip, NoMACAddr, logical_ip, 0, chassis) :-
 /* Routes */
 view Route ( lrouter     : lrouter_id_t
            , ip_prefix   : ip_subnet_t
-           , nexthop     : ip_addr_t
+           , nexthop     : opt_ip_addr_t
            , outport     : lrouter_port_id_t
            , outportmac  : mac_addr_t
            , outportip   : ip_addr_t)
 
-Route(lrouter, ip_prefix, nexthop, outport, outportmac, IPAddr4{outportip}) :- 
+Route(lrouter, ip_prefix, SomeIPAddr{nexthop}, outport, outportmac, IPAddr4{sn4.addr}) :- 
     LogicalRouterStaticRoute (lrouter, ip_prefix, nexthop, outport),
     LogicalRouterPort(outport, _, _, _, outportmac, _, _, _),
-    LRouterPortNetwork(outport, IPSubnet4{IP4Subnet{outportip, _}})
+    LRouterPortNetwork(outport, IPSubnet4{sn4})
 
-Route(lrouter, ip_prefix, nexthop, outport, outportmac, IPAddr6{outportip}) :- 
+Route(lrouter, ip_prefix, SomeIPAddr{nexthop}, outport, outportmac, IPAddr6{sn6.addr}) :- 
     LogicalRouterStaticRoute (lrouter, ip_prefix, nexthop, outport),
     LogicalRouterPort(outport, _, _, _, outportmac, _, _, _),
-    LRouterPortNetwork(outport, IPSubnet6{IP6Subnet{outportip, _}})
+    LRouterPortNetwork(outport, IPSubnet6{sn6})
+
+Route(lrouter, IPSubnet4{sn4}, NoIPAddr, outport, outportmac, IPAddr4{sn4.addr}) :- 
+    LRouterPortNetwork(outport, IPSubnet4{sn4}),
+    LogicalRouterPort(outport, _, lrouter, _, outportmac, e, _, _), e
+
+Route(lrouter, IPSubnet6{sn6}, NoIPAddr, outport, outportmac, IPAddr6{sn6.addr}) :- 
+    LRouterPortNetwork(outport, IPSubnet6{sn6}),
+    LogicalRouterPort(outport, _, lrouter, _, outportmac, e, _, _), e

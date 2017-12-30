@@ -887,30 +887,35 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t, localGW : b
     };
 
     // IP routing
-    var rt: Route;
+    var rt: opt_route_t;
     if (nat_redirect) {
         dec_ttl();
         the (gwport in LogicalRouterPort | gwport.lrouter == rport.lrouter and rportIsGW(gwport.ptype)) {
             pkt.dst = gwport.mac
         }
     } else {
-        var ort = route(rport, chassis);
-        match (ort) {
-            NoRoute      -> drop,
-            SomeRoute{r} -> rt = r
-        };
-        // ARP/ND resolution
-        resolve(rport, chassis, rt);
-    
-        // gateway redirect
-        the (orport in LogicalRouterPort | orport.id == rt.outport) {
-            if (pkt.dst == 0 and rportIsGW(orport.ptype)) {
-                nat_redirect = true
-            } else {
-                the  (nat in NAT | nat.lrouter == rport.lrouter and SomeIPAddr{IPAddr4{nat.logical_ip.addr}} == pktSrcIP(pkt) and (nat.logical_port != NoLPortId)) { () }
-                default { 
-                    if rportIsGW(orport.ptype) {
-                        nat_redirect = true 
+        rt = route(rport, chassis);
+        match (rt) {
+            NoRoute -> { drop },
+            SomeRoute{r} -> {
+                if (rt.route.nexthop == NoIPAddr) {
+                    rt.route.nexthop = pktDstIP(pkt)
+                };
+
+                // ARP/ND resolution
+                resolve(rport, chassis, r);
+            
+                // gateway redirect
+                the (orport in LogicalRouterPort | orport.id == r.outport) {
+                    if (pkt.dst == 0 and rportIsGW(orport.ptype)) {
+                        nat_redirect = true
+                    } else {
+                        the  (nat in NAT | nat.lrouter == rport.lrouter and SomeIPAddr{IPAddr4{nat.logical_ip.addr}} == pktSrcIP(pkt) and (nat.logical_port != NoLPortId)) { () }
+                        default { 
+                            if rportIsGW(orport.ptype) {
+                                nat_redirect = true 
+                            }
+                        }
                     }
                 }
             }
@@ -919,9 +924,9 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t, localGW : b
     
     // ARP request
     if (pkt.dst == 0) {
-        match ((rt.outportip, rt.nexthop)) {
-            (IPAddr4{oip}, IPAddr4{nip}) -> {
-                rportSendARPReq(chassis, rt.outport, oip, nip)
+        match ((rt.route.outportip, rt.route.nexthop)) {
+            (IPAddr4{oip}, SomeIPAddr{IPAddr4{nip}}) -> {
+                rportSendARPReq(chassis, rt.route.outport, oip, nip)
             },
             // XXX: should we send an ND message for IP6 address? The man page does not say so
             _ -> drop
@@ -937,11 +942,11 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t, localGW : b
             }
         } default { 
             // no tunnel -- must be local chassis
-            rportEgress(chassis, rt.outport, true) 
+            rportEgress(chassis, rt.route.outport, true) 
         }
     };
 
-    rportEgress(chassis, rt.outport, false)
+    rportEgress(chassis, rt.route.outport, false)
 }
 
 procedure unsnat(rport : LogicalRouterPort, chassis : chassis_id_t) : bool = {
@@ -1007,7 +1012,7 @@ procedure route(rport : LogicalRouterPort, chassis : chassis_id_t) : opt_route_t
 
 procedure resolve(rport : LogicalRouterPort, chassis : chassis_id_t, route: Route) : () = {
     // TODO: check statically known addresses first
-    the (addr in LearnedAddress | addr.rport == rport.id and addr.ip == route.nexthop) {
+    the (addr in LearnedAddress | addr.rport == rport.id and SomeIPAddr{addr.ip} == route.nexthop) {
         pkt.dst = addr.mac
     } default {
         pkt.dst = 0 // address unknown
