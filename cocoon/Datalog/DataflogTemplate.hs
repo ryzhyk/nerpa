@@ -384,7 +384,8 @@ git="https://github.com/frankmcsherry/differential-dataflow.git"
 [dependencies.timely]
 git="https://github.com/frankmcsherry/timely-dataflow.git"
 
-
+[dependencies.abomonation]
+git="https://github.com/frankmcsherry/abomonation.git"
 
 [dev-dependencies]
 getopts="0.2.14"
@@ -393,7 +394,6 @@ byteorder="0.4.2"
 itertools="^0.6"
 
 [dependencies]
-abomonation="0.4.6"
 fnv="1.0.2"
 num = "0.1.40"
 serde = "1.0.14"
@@ -405,8 +405,8 @@ default = []
 logging = ["timely/logging"]
 
 [profile.release]
-opt-level = 3
-debug = true
+opt-level = 1
+debug = false
 rpath = false
 lto = false
 debug-assertions = false
