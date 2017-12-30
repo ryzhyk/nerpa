@@ -132,6 +132,9 @@ validateFinal r = do
          Nothing -> return ()
          Just t  -> err (pos $ getFunc r $ snd $ head t) $ "Recursive function definition: " ++ (intercalate "->" $ map (name . snd) t)
     mapM_ (portValidateFinal r) $ refinePorts r
+    mapM_ (checkFuncRunsOnSwitch r [] . name)
+          $ filter (\f -> funcType f == tSink && (not $ elem (AnnotController nopos) $ funcAnnot f))
+          $ refineFuncs r
     --mapM_ (nodeValidateFinal r) $ refineNodes r
 --    mapM_ (\rl -> (mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos rl) $ "Output port behavior depends on undefined function " ++ f)) 
 --                  $ statFuncsRec r $ roleBody rl)
@@ -378,22 +381,21 @@ portValidateFinal r port@SwitchPort{..} = do
                        mapM_ (\dp@(DirPort _ dir) -> do assertR r (dir == DirIn) portPos $ "Output port function " ++ name pout ++ " sends to another outputport " ++ show dp)
                              $ exprSendsToPorts r def')
         portOut
-    checkFuncRunsOnSwitch r portName [] portIn 
     return ()
 
-checkFuncRunsOnSwitch :: (MonadError String me) => Refine -> String -> [String] -> String -> me ()
-checkFuncRunsOnSwitch r pname stack fname = do
+checkFuncRunsOnSwitch :: (MonadError String me) => Refine -> [String] -> String -> me ()
+checkFuncRunsOnSwitch r stack fname = do
     let f = getFunc r fname
-    let location = (intercalate ("\ninvoked from") $ (fname : stack)) ++ "\ninvoked by port " ++ pname
-    assertR r (isJust $ funcDef f) (pos f) $ "Methods executed inside a switch must be defined.  Method " ++ location ++ " is undefined"
+    let location = intercalate ("\ninvoked from") $ (fname : stack)
+    assertR r (isJust $ funcDef f) (pos f) $ "Methods executed inside a switch must be defined.  Method " ++ location ++ "\nis undefined"
     let fdef = fromJust $ funcDef f
     case exprMutatorsNonRec fdef of
          [] -> return ()
          ms -> errR r (pos f) $ 
                     "Code executing inside a switch cannot modify relations.  The following expressions in method " ++ location ++
                     "modify relations:\n" ++ (intercalate "\n" $ map (\e -> show e ++ " at " ++ (show $ pos e)) ms)
-    mapM_ (checkFuncRunsOnSwitch r pname (fname:stack))
-          $ filter (elem (AnnotController nopos) . funcAnnot . getFunc r)
+    mapM_ (checkFuncRunsOnSwitch r (fname:stack))
+          $ filter ((\f' -> (funcType f' /= tSink) && (not $ elem (AnnotController nopos) $ funcAnnot f')) . getFunc r)
           $ exprFuncs fdef   
          
 

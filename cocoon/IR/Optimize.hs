@@ -47,7 +47,7 @@ removeInputVars pls (_, []) = pls
 removeInputVars pls (plname, vars) = M.adjust (\pl_ -> pl_{plInputs = removeIndices (plInputs pl_) indices}) plname pls'
     where
     pl = pls M.! plname
-    indices = map (\v -> fromJust $ findIndex ((==v) . exprVarName) $ plInputs pl) vars
+    indices = map (\v -> fromJust $ findIndex ((==v) . exprVarName . snd) $ plInputs pl) vars
     pls' = M.map (plRemoveInputVars plname indices) pls
 
 plRemoveInputVars :: String -> [Int] -> Pipeline -> Pipeline
@@ -175,7 +175,7 @@ optUnusedVars _ pl = do
     if null unused
        then return pl
        else do setChanged
-               addUnused $ unused `intersect` (map exprVarName $ plInputs pl)
+               addUnused $ unused `intersect` (map (exprVarName . snd) $ plInputs pl)
                return $ foldl' removeVar pl unused
 
 removeVar :: Pipeline -> VarName -> Pipeline

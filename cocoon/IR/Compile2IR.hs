@@ -21,6 +21,7 @@ module IR.Compile2IR ( compileSwitch
                      , CompileState
                      , (.+)
                      , val2Record
+                     , val2Scalars
 
                      -- compiler internals exported for use in Builtins.hs
                      , VMap
@@ -69,7 +70,7 @@ setEntryNode :: I.NodeId -> CompileState ()
 setEntryNode nd = modify $ \pl -> pl{I.plEntryNode = nd}
 
 addInputs :: [I.Expr] -> CompileState ()
-addInputs inputs = modify $ \pl -> pl{I.plInputs = (I.plInputs pl) ++ inputs}
+addInputs inputs = modify $ \pl -> pl{I.plInputs = zip [0..] $ (map snd $ I.plInputs pl) ++ inputs}
 
 updateNode :: I.NodeId -> I.Node -> [I.NodeId] -> CompileState ()
 updateNode nid n suc = modify $ \pl@I.Pipeline{..} -> let (to, _, _, from) = G.context plCFG nid
@@ -528,5 +529,11 @@ val2Record r structs rname e@(E (EStruct{})) =
         names = exprTreeFlatten $ fields "" (relRecordType rel) (\_ n -> n)
     in M.fromList $ zip names vals
 val2Record _ _ _ e = error $ "Compile2IR.val2Record " ++ show e
+
+val2Scalars :: Refine -> StructReify -> Expr -> [I.Expr]
+val2Scalars r structs e  = 
+    let ?r = r in
+    let ?s = structs
+    in mkExpr M.empty CtxRefine e 
 
 

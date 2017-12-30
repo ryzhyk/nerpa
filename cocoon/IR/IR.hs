@@ -446,7 +446,7 @@ instance G.Labellable Edge where
 -- DAG
 type CFG = G.Gr Node Edge
 
-data Pipeline = Pipeline { plInputs :: [Expr]
+data Pipeline = Pipeline { plInputs :: [(Int, Expr)]
                          , plVars :: Vars
                          , plCFG :: CFG
                          , plEntryNode :: NodeId}
@@ -645,7 +645,7 @@ ctxLiveVars Pipeline{..} ctx =
          -- the first clause is needed to make sure that different
          -- inputs are assigned to differrent registers in case the pipeline has not
          -- been optimized and has some unused inputs
-         CtxNode nd | nd == plEntryNode -> nub $ (filter live $ M.keys plVars) ++ concatMap exprVars plInputs
+         CtxNode nd | nd == plEntryNode -> nub $ (filter live $ M.keys plVars) ++ concatMap (exprVars . snd) plInputs
          _                              -> filter live $ M.keys plVars
     where 
     -- forward search for locations that use the variable, aborting when the variable is assigned

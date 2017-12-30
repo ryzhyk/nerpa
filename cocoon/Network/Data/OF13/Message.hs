@@ -58,12 +58,13 @@ module Network.Data.OF13.Message (
   , PortStateFlag
   , isPortDown
   , isPortUp
+  , controllerPortID
   ) where
 
 import Network.Data.Ethernet hiding
   (getEthernetAddress, putEthernetAddress)
 import Network.Data.IPv4.IPAddress hiding (getIPAddress, putIPAddress)
-import Debug.Trace
+--import Debug.Trace
 
 import Control.Exception hiding (mask)
 import Control.Monad
@@ -335,8 +336,9 @@ data Action = Output { outputPortID :: PortID
             | SetGroup GroupID
             | SetNetworkTTL Word8
             | DecNetworkTTL
-            | SetNiciraRegister Int Word32
+            | SetNiciraRegister Int Word16 Word16 Word32
             | SetField OXM
+            | Table
             deriving (Eq,Ord,Show,Generic,NFData)
 
 type QueueID = Word32
@@ -1100,13 +1102,11 @@ putAction DecNetworkTTL = do
   putWord16be 24
   putWord16be 8
   putWord32be 0
-putAction (SetNiciraRegister idx v) = do
+putAction (SetNiciraRegister idx offset n_bits v) = do
   putWord16be oFPAT_EXPERIMENTER
   putWord16be 24
   putWord32be nX_VENDOR_ID
   putWord16be nXAST_REG_LOAD
-  let n_bits = 32
-      offset = 0
   putWord16be $ shiftL offset 6 .|. (n_bits - 1)
   putWord32be $ nXM_HEADER 1 (fromIntegral idx) 4
   putWord64be $ fromIntegral v
@@ -1157,7 +1157,7 @@ actionLength (SetQueue _) = 8
 actionLength (SetGroup _) = 8
 actionLength (SetNetworkTTL _) = 8
 actionLength DecNetworkTTL = 8
-actionLength (SetNiciraRegister _ _) = 24
+actionLength (SetNiciraRegister _ _ _ _) = 24
 
 multipart_type_desc :: Word16
 multipart_type_desc = 0

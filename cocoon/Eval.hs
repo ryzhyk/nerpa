@@ -131,6 +131,10 @@ evalExpr'' ctx e = do
         EVar _ v        -> (liftM (Left . (M.! v))) eget
         EPacket _       -> Left <$> pget
         EAnon _         -> (liftM (Left . (M.! "?"))) eget
+        EApply _ f as | (\f' -> funcType f' == tSink && (not $ elem (AnnotController nopos) $ funcAnnot f')) $ getFunc ?r f
+                        -> do as' <- mapIdxM (\a i -> fromLeft' <$> evalExpr' (CtxApply e ctx i) a) as
+                              pkt <- pget
+                              return $ Right [(pkt, ME $ Just $ EApply nopos f as')]
         EApply _ f as   -> do let fun = getFunc ?r f
                               kmap' <- liftM (M.fromList . (zip (map name $ funcArgs fun)) . map fromLeft')
                                        $ mapIdxM (\a i -> evalExpr' (CtxApply e ctx i) a) as
@@ -238,7 +242,7 @@ evalExpr'' ctx e = do
                                                       (intercalate "\n" $ map show rows') 
         ESend _ dst         -> do Left l <- evalExpr' (CtxSend e ctx) dst
                                   pkt <- pget
-                                  return $ Right [(pkt, l)]
+                                  return $ Right [(pkt, ME $ Just $ ESend nopos l)]
         EDrop _             -> return $ Right []
         ELocation _ p k d   -> do Left k' <- evalExpr' (CtxLocation e ctx) k
                                   return $ Left $ meLocation p k' d

@@ -17,7 +17,7 @@ limitations under the License.
 -- OpenFlow protocol handler for OVS based on the openflow library
 -- Andreas Voellmy's openflow library for Haskell
 
-{-# LANGUAGE RecordWildCards, FlexibleContexts, ScopedTypeVariables #-}
+{-# LANGUAGE RecordWildCards, FlexibleContexts, ScopedTypeVariables, LambdaCase #-}
 
 module OpenFlow.OVSProtocol where
 
@@ -28,6 +28,8 @@ import Control.Concurrent
 import Data.List
 import Data.IORef
 import Data.Bits
+import Data.Word
+import Data.Maybe
 import Data.Binary.Get
 import Data.Binary.Put
 import qualified Data.ByteString      as B
@@ -47,6 +49,7 @@ import OpenFlow.OVSPacket
 import OpenFlow.OVSConst
 import qualified OpenFlow.IR2OF    as OF
 import qualified IR.IR             as IR
+import qualified IR.Compile2IR     as IR
 
 
 
@@ -181,12 +184,34 @@ doPacketIn r msg@PacketIn{..} = (do
     -- call swCB
     outpkts <- swCB f as' pkt 
     -- send packets
-    mapM_ (\(pkt', E (ELocation _ _ key _)) -> do 
+    mapM_ (\case 
+           (pkt', (E (ESend _ (E (ELocation _ _ key _))))) -> do 
                 --putStrLn $ "packet-out: " ++ show pkt'
                 let E (EBit _ _ pnum) = evalConstExpr swRefine $ eField key "portnum"
                     (b, acts) = unparsePkt pkt' rest
                     acts' = acts ++ [Output (fromInteger pnum) Nothing]
-                sendMessage swSw [PacketOut xid Nothing inpnum acts' b]) outpkts 
+                sendMessage swSw [PacketOut xid Nothing inpnum acts' b]
+           (pkt', (E (EApply _ fun fas))) -> do
+                let -- find fun's pipeline
+                    fpl = swir M.! fun
+                    fidx = fromJust $ M.lookupIndex fun swir
+                    -- convert as to IR
+                    fas' = concatMap (IR.val2Scalars swRefine ovsStructReify) fas
+                    -- filter inputs to the function
+                    fas'' = map (\(idx,reg) -> (fas' !! idx, reg)) $ IR.plInputs fpl
+                    -- create output message
+                    (b, acts) = unparsePkt pkt' rest
+                    regacts = concatMap (\(v,reg) -> case v of
+                                                          IR.EBool True  -> setRegAction reg 1
+                                                          IR.EBool False -> setRegAction reg 0
+                                                          IR.EBit  _ x   -> setRegAction reg x
+                                                          _              -> error $ "OVSPacket.doPacketIn: unexpected value: " ++ show v) fas''
+                    meta = SetField $ Metadata (fromIntegral fidx) (-1) True 
+                    acts' = acts ++ [meta] ++ regacts ++ [Table]
+                sendMessage swSw [PacketOut xid Nothing Nothing acts' b]
+           (_,x) -> error $ "OVSPacket.doPacketIn: unexpected result: " ++ show x
+           ) 
+           outpkts 
     ) `catch` (\(e::SomeException) -> do 
                             putStrLn $ "error handling packet-in message: " ++ show e ++ "\nmessage content: " ++ show msg
                             return ())
@@ -250,8 +275,81 @@ eval oxms e =
     getofreg i = fmap (\(PacketRegister _ v) -> fromIntegral v) $ M.lookup (OPacketRegister i) oxms
     getxreg i  = case getofreg i of
                       Just v  -> v
-                      Nothing -> (getreg (2*i+1) `shiftL` 32) + getreg (2*i)
-    getxxreg i = (getxreg (2*i+1) `shiftL` 64) + getxreg (2*i)
+                      Nothing -> (getreg (2*i) `shiftL` 32) + getreg (2*i + 1)
+    getxxreg i = (getxreg (2*i) `shiftL` 64) + getxreg (2*i + 1)
+
+setReg :: Int -> Int -> Int -> Word32 -> Action
+setReg reg off nbits val = SetNiciraRegister reg (fromIntegral off) (fromIntegral nbits) val
+
+setXReg :: Int -> Int -> Int -> Word64 -> [Action]
+setXReg reg off nbits val = a0 ++ a1
+    where
+    off0    = max 0 (off - 32)
+    nbits0  = nbits - (max 0 (32 - off))
+    val0    = fromIntegral $ bitSlice val (nbits - 1) (nbits - nbits0)
+    off1    = off
+    nbits1  = min (32 - off1) nbits
+    val1    = fromIntegral $ bitSlice val (nbits1 - 1) 0
+    a0      = if nbits0 >= 0
+                 then [setReg (2*reg) off0 nbits0 val0]
+                 else []
+    a1      = if nbits1 >= 0
+                 then [setReg (2*reg+1) off1 nbits1 val1]
+                 else []
+
+setXXReg :: Int -> Int -> Int -> Integer -> [Action]
+setXXReg reg off nbits val = a0 ++ a1
+    where
+    off0    = max 0 (off - 64)
+    nbits0  = nbits - (max 0 (64 - off))
+    val0    = fromInteger $ bitSlice val (nbits - 1) (nbits - nbits0)
+    off1    = off
+    nbits1  = min (64 - off1) nbits
+    val1    = fromInteger $ bitSlice val (nbits1 - 1) 0
+    a0      = if nbits0 >= 0
+                 then setXReg (2*reg) off0 nbits0 val0
+                 else []
+    a1      = if nbits1 >= 0
+                 then setXReg (2*reg+1) off1 nbits1 val1
+                 else []
+
+setRegAction :: IR.Expr -> Integer -> [Action]
+setRegAction (IR.EVar reg _) v | isPrefixOf "reg" reg   = setRegAction' reg 0 32  v
+setRegAction (IR.EVar reg _) v | isPrefixOf "xreg" reg  = setRegAction' reg 0 64  v
+setRegAction (IR.EVar reg _) v | isPrefixOf "xxreg" reg = setRegAction' reg 0 128 v
+setRegAction (IR.ESlice (IR.EVar reg _) h l) v          = setRegAction' reg l (h-l+1) v
+setRegAction e  _                                       = error $ "OVSProtocol.setRegAction: unexpected expression " ++ show e
+
+setRegAction' :: String -> Int -> Int -> Integer -> [Action]
+setRegAction' reg off nbits val = 
+    case reg of
+         "reg0"   -> [setReg 0  off nbits val32]
+         "reg1"   -> [setReg 1  off nbits val32]
+         "reg2"   -> [setReg 2  off nbits val32]
+         "reg3"   -> [setReg 3  off nbits val32]
+         "reg4"   -> [setReg 4  off nbits val32]
+         "reg5"   -> [setReg 5  off nbits val32]
+         "reg6"   -> [setReg 6  off nbits val32]
+         "reg7"   -> [setReg 7  off nbits val32]
+         "reg8"   -> [setReg 8  off nbits val32]
+         "reg9"   -> [setReg 9  off nbits val32]
+         "reg10"  -> [setReg 10 off nbits val32]
+         "reg11"  -> [setReg 11 off nbits val32]
+         "xreg0"  -> setXReg 0 off nbits val64
+         "xreg1"  -> setXReg 1 off nbits val64
+         "xreg2"  -> setXReg 2 off nbits val64
+         "xreg3"  -> setXReg 3 off nbits val64
+         "xreg4"  -> setXReg 4 off nbits val64
+         "xreg5"  -> setXReg 5 off nbits val64
+         "xreg6"  -> setXReg 6 off nbits val64
+         "xreg7"  -> setXReg 7 off nbits val64
+         "xxreg0" -> setXXReg 0 off nbits val
+         "xxreg1" -> setXXReg 1 off nbits val
+         "xxreg2" -> setXXReg 2 off nbits val
+         "xxreg3" -> setXXReg 3 off nbits val
+         _        -> error $ "OVSProtocol.setRegAction': unknown register " ++ reg
+    where val32 = fromInteger val
+          val64 = fromInteger val
 
 ovsStop :: IO ()
 ovsStop = return ()

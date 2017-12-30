@@ -49,6 +49,7 @@ import qualified Backend           as B
 import qualified Syntax            as C -- Cocoon
 import qualified Eval              as C
 import qualified NS                as C
+import qualified Network.Data.OF13.Message as OFP
 
 -- Uniquely identify an instance of the switch:
 type SwitchId = Integer
@@ -117,9 +118,13 @@ assignTables pls = foldl' (\(start, pls') (n,pl) -> let (start', pl') = relabel 
 -- New switch event
 --   Store the list of tables this switch depends on
 buildSwitch :: C.Refine -> B.StructReify -> O.Field -> RuntimeState -> (String, IRSwitch) -> I.DB -> SwitchId -> ([O.Command], RuntimeState)
-buildSwitch r structs idxfield s ir db swid = (table0 : (staticcmds ++ updcmds), s')
+buildSwitch r structs idxfield s ir db swid = (table0 ++ staticcmds ++ updcmds, s')
     where
-    table0 = O.AddFlow 0 $ O.Flow 0 [] [O.ActionDrop]
+    -- handle packet-out packets from the controller that should
+    table0 = (O.AddFlow 0 $ O.Flow 0 [] [O.ActionDrop]) :
+             (mapIdx (\(_, pl) i -> O.AddFlow 0 $ O.Flow 1 [ O.Match (O.Field "portnum_oxm" 32) Nothing (toInteger $ OFP.controllerPortID)
+                                                           , O.Match (O.Field "metadata" 64) Nothing $ toInteger i] 
+                                                           [O.ActionGoto $ I.plEntryNode pl]) $ M.toList $ snd ir)
     -- Configure static part of the pipeline
     staticcmds = let ?r = r 
                      ?structs = structs
@@ -440,7 +445,7 @@ mkPLMatchBB vars c (yes, no) pl (I.BB as nxt) =
     let vars' = foldl' mkPLMatchAction vars as in
     case nxt of
          I.Drop     -> (I.disj [yes, I.conj [I.EUnOp Not no, c]], no)
-         I.Goto nd' -> let (yes', no') = mkPLMatchNode vars' nd' pl
+         I.Goto nd' -> let (yes', _) = mkPLMatchNode vars' nd' pl
                        in (I.disj [yes, I.conj [I.EUnOp Not no, c, yes']], I.disj [no, c])
          _          -> error ""
 
@@ -536,7 +541,7 @@ mkNext _ _  _ r (I.Call f as)      = (map (\(a,_) -> O.ActionPush a) varargs) ++
                                      [O.ActionResubmit $ I.plEntryNode pl]
     where
     pl = (snd ?ir) M.! f
-    (constargs, varargs) = partition (O.exprIsConst . fst) $ zip (map (mkExpr r) as) (map (mkExpr r) $ I.plInputs pl)
+    (constargs, varargs) = partition (O.exprIsConst . fst) $ zip (map (mkExpr r) as) (map (mkExpr r . snd) $ I.plInputs pl)
 mkNext n nd i _ (I.Controller _ _) = [ O.ActionSet (O.EField (O.Field "metadata" 64) Nothing) 
                                                    (O.EVal $ O.Value 64 $ ((toInteger plnum) `shiftL` 48) + ((toInteger swnum) `shiftL` 32) + ((toInteger nd) `shiftL` 16) + toInteger i)
                                      , O.ActionController]
