@@ -18,6 +18,8 @@ module Network.Data.OF13.Message (
   , PortID
   , Priority
   , oFPP_CONTROLLER
+  , oFPP_ANY
+  , oFPP_TABLE
   , Group(..)
   , GroupID
   , ActionList
@@ -256,8 +258,9 @@ data Instruction = GotoTable TableID
 
 type MeterID = Word32
 
-oFPP_CONTROLLER, oFPP_ANY :: PortID
+oFPP_CONTROLLER, oFPP_ANY, oFPP_TABLE :: PortID
 oFPP_CONTROLLER = 0xfffffffd
+oFPP_TABLE      = 0xfffffff9
 oFPP_ANY = 0xffffffff
 
 oFPG_MAX, oFPG_ALL, oFPG_ANY :: GroupID
@@ -338,7 +341,6 @@ data Action = Output { outputPortID :: PortID
             | DecNetworkTTL
             | SetNiciraRegister Int Word16 Word16 Word32
             | SetField OXM
-            | Table
             deriving (Eq,Ord,Show,Generic,NFData)
 
 type QueueID = Word32

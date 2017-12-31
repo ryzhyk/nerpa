@@ -42,6 +42,7 @@ packet2Expr oxmmap (h, b) =
              , eBit 48 $ fromIntegral $ etherSrc h
              , eBit 48 $ fromIntegral $ etherDst h
              , vlan 
+             , eBit 16 $ fromIntegral $ typeCode b
              , p], pl)
     where
     tun_id = case M.lookup OTunnelID oxmmap of
@@ -64,8 +65,7 @@ packet2Expr oxmmap (h, b) =
     
 ip4Pkt2Expr :: IPPacket -> (Expr, BS.ByteString)
 ip4Pkt2Expr (IPHeader{..}, b) = 
-    (eStruct "IP4Pkt" [ eBit 4  $ toInteger headerLength
-                      , eBit 6  $ toInteger dscp
+    (eStruct "IP4Pkt" [ eBit 6  $ toInteger dscp
                       , eBit 2  $ toInteger ecn
                       , eBit 16 $ toInteger totalLength
                       , eBit 16 $ toInteger ident
@@ -87,22 +87,23 @@ icmpPkt2Expr ((t, c, _), pl) =
 
 arpPkt2Expr :: ARPPacket -> (Expr, BS.ByteString)
 arpPkt2Expr (ARPQuery ARPQueryPacket{..}) = 
-    (eStruct "ARPPacket" [ eStruct "ARPRequest" []
-                         , eBit 32 $ toInteger querySenderIPAddress
-                         , eBit 32 $ toInteger queryTargetIPAddress
-                         , eBit 48 $ toInteger querySenderEthernetAddress
-                         , eBit 48 $ toInteger queryTargetEthernetAddress], BS.empty)
+    (eStruct "ARPPkt" [ eStruct "ARPRequest" []
+                      , eBit 32 $ toInteger querySenderIPAddress
+                      , eBit 32 $ toInteger queryTargetIPAddress
+                      , eBit 48 $ toInteger querySenderEthernetAddress
+                      , eBit 48 $ toInteger queryTargetEthernetAddress], BS.empty)
 arpPkt2Expr (ARPReply ARPReplyPacket{..}) =
-    (eStruct "ARPPacket" [ eStruct "ARPReply" []
-                         , eBit 32 $ toInteger replySenderIPAddress
-                         , eBit 32 $ toInteger replyTargetIPAddress
-                         , eBit 48 $ toInteger replySenderEthernetAddress
-                         , eBit 48 $ toInteger replyTargetEthernetAddress], BS.empty)
+    (eStruct "ARPPkt" [ eStruct "ARPReply" []
+                      , eBit 32 $ toInteger replySenderIPAddress
+                      , eBit 32 $ toInteger replyTargetIPAddress
+                      , eBit 48 $ toInteger replySenderEthernetAddress
+                      , eBit 48 $ toInteger replyTargetEthernetAddress], BS.empty)
 
 
 udpPkt2Expr :: UDPPacket -> (Expr, BS.ByteString)
-udpPkt2Expr ((sport, dport, len, _), pl) = 
-    (eStruct "UDPPkt" [eBit 16 $ toInteger sport, eBit 16 $ toInteger dport, eBit 16 $ toInteger len] ,pl)
+udpPkt2Expr ((sport, dport, len, _), pl) =
+    -- TODO: handle DHCP payload 
+    (eStruct "UDPPkt" [eBit 16 $ toInteger sport, eBit 16 $ toInteger dport, eBit 16 $ toInteger len, eStruct "UDPOther" []] ,pl)
 
 expr2Packet :: Expr -> BS.ByteString -> (EthernetFrame, Word64, Word32)
 expr2Packet e payload = ((h,b), tunid, tundst)
@@ -113,6 +114,7 @@ expr2Packet e payload = ((h,b), tunid, tundst)
        , E (EBit _ 48 src)
        , E (EBit _ 48 dst)
        , vlan
+       , E (EBit _ 16 _)
        , pl]) = e
     E (EStruct _"VLAN" 
        [ E (EBit _ 3  pcp)
@@ -135,19 +137,18 @@ expr2ARPPkt e = case op of
                      "ARPReply"   -> ARPReply $ ARPReplyPacket (fromInteger sha) (fromInteger spa) (fromInteger tha) (fromInteger tpa)
                      _            -> error "Unknown ARP operation"
     where
-    E (EStruct _ "ARPPacket" [ E (EStruct _ op _)
-                             , E (EBit _ 32 sha)
-                             , E (EBit _ 32 tha)
-                             , E (EBit _ 48 spa)
-                             , E (EBit _ 48 tpa)]) = e
+    E (EStruct _ "ARPPkt" [ E (EStruct _ op _)
+                          , E (EBit _ 32 sha)
+                          , E (EBit _ 32 tha)
+                          , E (EBit _ 48 spa)
+                          , E (EBit _ 48 tpa)]) = e
 
 
 expr2IP4Pkt :: Expr -> BS.ByteString -> IPPacket
 expr2IP4Pkt e payload = (h{ipChecksum=csum},b)
     where
     E (EStruct _ "IP4Pkt" 
-       [ E (EBit _ 4  ihl)
-       , E (EBit _ 6  dscp)
+       [ E (EBit _ 6  dscp)
        , E (EBit _ 2  ecn)
        , E (EBit _ 16 totalLen)
        , E (EBit _ 16 ident)
@@ -159,7 +160,7 @@ expr2IP4Pkt e payload = (h{ipChecksum=csum},b)
        , pl]) = e
     h = IPHeader (fromInteger ipSrcAddress)
                  (fromInteger ipDstAddress)
-                 (fromInteger ihl)
+                 5
                  (fromInteger totalLen)
                  (fromInteger dscp)
                  (fromInteger ecn)
@@ -170,7 +171,7 @@ expr2IP4Pkt e payload = (h{ipChecksum=csum},b)
                  (fromInteger flagsOff)
     csum = checksum16BS $ runPut $ putIPHeader h 0
     b = case pl of
-             E (EStruct _ "UDPPkt" [E (EBit _ 16 sport), E (EBit _ 16 dport), E (EBit _ 16 len)]) 
+             E (EStruct _ "UDPPkt" [E (EBit _ 16 sport), E (EBit _ 16 dport), E (EBit _ 16 len), _]) 
                                                                         -> UDPInIP ((fromInteger sport, fromInteger dport, fromInteger len, 0), payload)
              E (EStruct _ "ICMP4Pkt" [E (EBit _ 8 t), E (EBit _ 8 c)])  -> let icmp = ((fromInteger t, fromInteger c, 0), payload)
                                                                                cs = checksum16BS $ runPut $ putICMPPacket icmp 0

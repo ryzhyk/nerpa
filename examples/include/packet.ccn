@@ -54,7 +54,6 @@ typedef eth_pkt_t = EthPacket { vxlan   : vxlan_t
                               , src     : mac_addr_t
                               , dst     : mac_addr_t
                               , vlan    : vlan_t
-                              , ct      : conn_track_t
                               , ethtype : bit<16>
                               , payload : eth_payload_t}
 
@@ -109,18 +108,6 @@ typedef ct_commit_t = CTCommit { mark   : bit<32>  // r/w
                                , label  : bit<128> // r/w
                                , nat    : ct_nat_t // read-only
                                }
-
-typedef conn_track_t = CT { new    : bool        // read-only
-                          , est    : bool        // read-only
-                          , rel    : bool        // read-only
-                          , rpl    : bool        // read-only
-                          , inv    : bool        // read-only
-                          , trk    : bool        // read-only
-                          , snat   : bool        // read-only
-                          , dnat   : bool        // read-only
-                          , track  : bool        // write-only: writing any value to this bit sends the packet to connection tracker
-                          , commit : ct_commit_t // writing to this field commits the packet to connection tracking
-                          }    
 
 typedef vxlan_t = VXLAN { tun_dst : ip4_addr_t
                         , tun_id  : bit<64> }
@@ -186,7 +173,7 @@ typedef udp_pkt_t = UDPPkt { src     : bit<16>
 typedef udp_payload_t = UDPDHCP4{dhcp4 : dhcp4_pkt_t}
                       | UDPDHCP6{dhcp6 : dhcp6_pkt_t}
                       //| UDPDNS  {dns   : dns_pkt_t}
-                      //| UDPOther
+                      | UDPOther
 
 /*
 typedef dns_pkt_t = DNSPkt { id     : bit<16>

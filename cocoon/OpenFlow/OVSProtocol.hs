@@ -179,19 +179,20 @@ doPacketIn r msg@PacketIn{..} = (do
     --putStrLn $ "action: " ++ f ++ "(" ++ (intercalate ", " $ map show as') ++ ")"
     -- parse packet
     (pkt, rest) <- parsePkt oxmmap payload
-    --putStrLn $ "packet: " ++ show pkt
+    putStrLn $ "packet-in: " ++ show pkt
     --putStrLn $ "payload: " ++ show rest
     -- call swCB
     outpkts <- swCB f as' pkt 
     -- send packets
     mapM_ (\case 
            (pkt', (E (ESend _ (E (ELocation _ _ key _))))) -> do 
-                --putStrLn $ "packet-out: " ++ show pkt'
+                putStrLn $ "packet-out: " ++ show pkt'
                 let E (EBit _ _ pnum) = evalConstExpr swRefine $ eField key "portnum"
                     (b, acts) = unparsePkt pkt' rest
                     acts' = acts ++ [Output (fromInteger pnum) Nothing]
                 sendMessage swSw [PacketOut xid Nothing inpnum acts' b]
            (pkt', (E (EApply _ fun fas))) -> do
+                putStrLn $ "packet-out (recirculate): " ++ show pkt'
                 let -- find fun's pipeline
                     fpl = swir M.! fun
                     fidx = fromJust $ M.lookupIndex fun swir
@@ -206,8 +207,8 @@ doPacketIn r msg@PacketIn{..} = (do
                                                           IR.EBool False -> setRegAction reg 0
                                                           IR.EBit  _ x   -> setRegAction reg x
                                                           _              -> error $ "OVSPacket.doPacketIn: unexpected value: " ++ show v) fas''
-                    meta = SetField $ Metadata (fromIntegral fidx) (-1) True 
-                    acts' = acts ++ [meta] ++ regacts ++ [Table]
+                    meta = SetField $ Metadata (fromIntegral fidx) (-1) False 
+                    acts' = acts ++ [meta] ++ regacts ++  [Output oFPP_TABLE Nothing]
                 sendMessage swSw [PacketOut xid Nothing Nothing acts' b]
            (_,x) -> error $ "OVSPacket.doPacketIn: unexpected result: " ++ show x
            ) 

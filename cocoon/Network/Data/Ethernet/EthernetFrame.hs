@@ -15,6 +15,7 @@ module Network.Data.Ethernet.EthernetFrame (
   , EthernetTypeCode
   , UnknownFrame(..)
   , MagellanP4Packet(..)
+  , IsEthernetBody(..)
 
   , typeCode
   , ethTypeVLAN
@@ -53,6 +54,7 @@ import Network.Data.IPv4.IPPacket
 import Text.Printf (printf)
 import Control.DeepSeq (NFData)
 import GHC.Generics (Generic)
+--import Debug.Trace
 
 -- | An Ethernet frame is either an IP packet, an ARP packet, or an uninterpreted @ByteString@.
 -- Based on http://en.wikipedia.org/wiki/File:Ethernet_Type_II_Frame_format.svg

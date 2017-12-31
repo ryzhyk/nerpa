@@ -128,15 +128,15 @@ function ipSrcMatch(p: eth_payload_t, subnet: ip_subnet_t): bool = {
 
 function isPktDHCPDiscovery(p: Packet): bool = {
     match (p) {
-        EthPacket {_,_,_,_,_,_,_,EthIP4{IP4Pkt{_,_,_,_,_,_,_,sip,dip,IPUDP{UDPPkt{sport,dport,_,_}}}}} -> 
+        EthPacket {_,_,_,_,_,_,EthIP4{IP4Pkt{_,_,_,_,_,_,_,sip,dip,IPUDP{UDPPkt{sport,dport,_,_}}}}} -> 
             sip == 0 and dip == 32'hffffffff and sport == 68 and dport == 67,
-        _                                                                                              -> false
+        _                                                                                            -> false
     }
 }
 
 function isPktDAD(p: Packet): bool = {
     match (p) {
-        EthPacket {_,_,_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,sip,_,IPICMP6{ICMP6Pkt{ptype,_,_}}}}} -> ptype == 135 and sip == 0,
+        EthPacket {_,_,_,_,_,_,EthIP6{IP6Pkt{_,_,_,_,_,sip,_,IPICMP6{ICMP6Pkt{ptype,_,_}}}}} -> ptype == 135 and sip == 0,
         _                                                                                    -> false
     }
 }

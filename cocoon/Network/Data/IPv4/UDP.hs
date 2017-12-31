@@ -28,7 +28,6 @@ getUDPHeader = do
   dstp <- getWord16be
   len  <- getWord16be 
   csum <- getWord16be 
-  skip 4
   return (srcp, dstp, len, csum)
 {-# INLINE getUDPHeader #-}  
 
