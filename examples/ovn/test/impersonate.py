@@ -1192,6 +1192,7 @@ def ovsAddBr(cmd):
     log("add-br " + br + str(par) + ' ' + str(vlan))
     if br == "br-int":
         ovs_vsctl(["set", "bridge", br, "protocols=OpenFlow13,OpenFlow15"])
+        ovs_vsctl(["set-controller", br, "tcp:127.0.0.1:6633"])
         hypervisor = getHyhpervisor()
         server = '"unix:' + ovs_rundir + '/' + br + '.mgmt' + '"'
         cocoon("Chassis.put(Chassis{" + ", ".join([mkChassisId(hypervisor), "false", server, '""'])  + "})")
