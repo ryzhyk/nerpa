@@ -93,11 +93,12 @@ data Action = ActionOutput     {actPort :: Expr}
             | ActionController
             | ActionPush       {actArg :: Expr}
             | ActionPop        {actArg :: Expr}
+            deriving (Show)
 
 data Flow = Flow { flowPriority :: Prio
                  , flowMatch    :: [Match]
                  , flowActions  :: [Action]
-                 }
+                 } deriving (Show)
 
 data GroupType = GroupAll
                | GroupSelect
@@ -112,12 +113,12 @@ instance Show GroupType where
     show = render . pp
 
 type BucketId = Int
-data Bucket = Bucket (Maybe BucketId) [Action]
+data Bucket = Bucket (Maybe BucketId) [Action] deriving (Show)
 
 data Group = Group { groupId      :: GroupId 
                    , groupType    :: GroupType
                    , groupBuckets :: [Bucket]
-                   }
+                   } deriving (Show)
 
 data Command = AddFlow   HTable Flow
              | DelFlow   HTable Prio [Match]
@@ -125,3 +126,4 @@ data Command = AddFlow   HTable Flow
              | DelGroup  GroupId
              | AddBucket GroupId Bucket
              | DelBucket GroupId BucketId
+             deriving (Show)

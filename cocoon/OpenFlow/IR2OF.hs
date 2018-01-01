@@ -240,7 +240,7 @@ updateNode db plname portpl swid (nd, node) = {-trace ("updateNode " ++ show nd)
         return $ grcmds ++ delcmd
 
     addGroup :: O.GroupType -> C.Expr -> State SwRuntimeState [O.Command]
-    addGroup gt f = do
+    addGroup gt f = {-trace ("addGroup " ++ show f) $-} do
         let bb = case node of
                       I.Lookup _ _ _ th _ _ -> th
                       I.Fork _ _ _ b        -> b
@@ -271,7 +271,7 @@ updateNode db plname portpl swid (nd, node) = {-trace ("updateNode " ++ show nd)
         let addcmd = [ O.AddBucket g $ O.Bucket (Just bid) [O.ActionSet (O.EField ?idxfield (Just (31,0))) (O.EVal $ O.Value 32 idx), O.ActionResubmit (nd+1)]
                      , O.AddFlow (nd+1) $ O.Flow 1 [O.Match ?idxfield (Just 0xffffffff) idx] $ mkBB plname nd 0 f bb]
         putNode nd s''
-        return $ grcmds ++ addcmd
+        return {-$ trace ("commands: " ++ show (grcmds ++ addcmd))-} $ grcmds ++ addcmd
 
     -- Group id allocator -- just keep incrementing for now
     -- TODO: implement real allocator
