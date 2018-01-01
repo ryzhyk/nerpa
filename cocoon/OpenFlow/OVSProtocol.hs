@@ -251,6 +251,10 @@ eval oxms e =
          IR.EVar      "reg9"    _   -> eBit 32 $ getreg 9
          IR.EVar      "reg10"   _   -> eBit 32 $ getreg 10
          IR.EVar      "reg11"   _   -> eBit 32 $ getreg 11
+         IR.EVar      "reg12"   _   -> eBit 32 $ getreg 12
+         IR.EVar      "reg13"   _   -> eBit 32 $ getreg 13
+         IR.EVar      "reg14"   _   -> eBit 32 $ getreg 14
+         IR.EVar      "reg15"   _   -> eBit 32 $ getreg 15
          IR.EVar      "xreg0"   _   -> eBit 64 $ getxreg 0
          IR.EVar      "xreg1"   _   -> eBit 64 $ getxreg 1
          IR.EVar      "xreg2"   _   -> eBit 64 $ getxreg 2
@@ -267,7 +271,7 @@ eval oxms e =
          IR.EBinOp    op x1 x2      -> eBinOp op (eval oxms x1) (eval oxms x2)
          IR.EUnOp     op x          -> eUnOp op $ eval oxms x
          -- TODO: packet field -> return unevaluated
-         _                          -> error $ "Not implemented: OVS.eval " ++ show e
+         _                          -> error $ "Not implemented: OVSProtocol.eval " ++ show e
     where
     getreg i   = case getofreg (i `div` 2) of
                       Just v | testBit i 0 -> bitSlice v 31 0
