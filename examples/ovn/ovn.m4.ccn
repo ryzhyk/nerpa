@@ -480,7 +480,6 @@ procedure bounce(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
         · If  the  logical  router  has  rules specified in nat with external_mac, then those addresses are also used to populate the switch’s destination lookup on the chassis where logical_port is resident.
     · One priority-0 fallback flow that matches all packets and outputs them to the MC_UNKNOWN multicast group, which ovn-northd populates with all enabled  logical  ports that  accept  unknown destination packets. As a small optimization, if no logical ports accept unknown destination packets, ovn-northd omits this multicast group and logical flow.
 */
-// TODO: optimize tail calls to sendToChassis
 procedure dstLookup(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
     /* Compute chassis to forward the packet to */
     var dst : destination_t;
@@ -528,8 +527,14 @@ procedure vSwitchEgress(local : bool, chassis: chassis_id_t, lswitch : lswitch_i
     /* multicast? - deliver to all local ports on this switch */
     var lport : lport_id_t;
     if (ethMulticastAddr(pkt.dst)) {
-        fork(lp in LPortAtChassis | lp.lswitch == lswitch and lp.chassis == chassis and (lp.float => local)) {
-            lport = lp.lport
+        if (local) {
+            fork(lp in LPortAtChassis | lp.lswitch == lswitch and lp.chassis == chassis) {
+                lport = lp.lport
+            }
+        } else {
+            fork(lp in LPortAtChassis | lp.lswitch == lswitch and lp.chassis == chassis and (not lp.float)) {
+                lport = lp.lport
+            }
         }
     } else {
         /* unicast - deliver to port that owns the address, or to all ports with unknown addresses */
@@ -540,10 +545,14 @@ procedure vSwitchEgress(local : bool, chassis: chassis_id_t, lswitch : lswitch_i
             lport = lp.lport
         } default {
             /* destination unknown: send to all chassis that host ports with unknown addresses */
-            fork (lp in LPortUnknownMACChassis | lp.lswitch == lswitch and 
-                                                 lp.chassis == chassis and 
-                                                 (lp.float => local)) {
-                lport = lp.lport
+            if (local) {
+                fork (lp in LPortUnknownMACChassis | lp.lswitch == lswitch and lp.chassis == chassis) {
+                    lport = lp.lport
+                }
+            } else {
+                fork (lp in LPortUnknownMACChassis | lp.lswitch == lswitch and lp.chassis == chassis and (not lp.float)) {
+                    lport = lp.lport
+                }
             }
         }
     };
