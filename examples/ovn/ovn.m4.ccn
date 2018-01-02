@@ -1154,7 +1154,7 @@ procedure ctlMkNA(rport : lrouter_port_id_t, srcip : ip6_addr_t, srcmac : mac_ad
 #controller
 procedure rportSendARPReq(chassis : chassis_id_t, rport : lrouter_port_id_t, oip : ip4_addr_t, nip : ip4_addr_t) : sink = {
     pkt.dst = 48'hffffffffffff;
-    pkt.payload = EthARP{ARPPkt{ARPRequest, oip, nip, pkt.src, 48'hffffffffffff}};
+    pkt.payload = EthARP{ARPPkt{ARPRequest, oip, nip, pkt.src, 48'h0}};
     rportEgress(chassis, rport, false) 
 }
 
