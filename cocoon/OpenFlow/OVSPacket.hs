@@ -138,10 +138,10 @@ expr2ARPPkt e = case op of
                      _            -> error "Unknown ARP operation"
     where
     E (EStruct _ "ARPPkt" [ E (EStruct _ op _)
-                          , E (EBit _ 32 sha)
-                          , E (EBit _ 32 tha)
-                          , E (EBit _ 48 spa)
-                          , E (EBit _ 48 tpa)]) = e
+                          , E (EBit _ 32 spa)
+                          , E (EBit _ 32 tpa)
+                          , E (EBit _ 48 sha)
+                          , E (EBit _ 48 tha) ]) = e
 
 
 expr2IP4Pkt :: Expr -> BS.ByteString -> IPPacket
