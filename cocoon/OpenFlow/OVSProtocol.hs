@@ -174,12 +174,13 @@ doPacketIn r msg@PacketIn{..} = (do
     (f, as) <- case nxt of
                     IR.Controller f' as' -> return (f', as')
                     _                    -> error $ "invalid Next action: " ++ show nxt
-    -- evaluate arguments
-    let as' = map (eval oxmmap) as
     --putStrLn $ "action: " ++ f ++ "(" ++ (intercalate ", " $ map show as') ++ ")"
     -- parse packet
     (pkt, rest) <- parsePkt oxmmap payload
+    let irpkt = IR.struct2Record swRefine ovsStructReify "" pkt
     putStrLn $ "packet-in: " ++ show pkt
+    -- evaluate arguments
+    let as' = map (eval oxmmap irpkt) as
     --putStrLn $ "payload: " ++ show rest
     -- call swCB
     outpkts <- swCB f as' pkt 
@@ -234,8 +235,8 @@ unparsePkt e pl = ( BL.toStrict $ runPut $ putEthFrame pkt
     where 
     (pkt, tunid, tundst) = expr2Packet e pl
 
-eval :: M.Map OXKey OXM -> IR.Expr -> Expr
-eval oxms e = 
+eval :: M.Map OXKey OXM -> IR.Record -> IR.Expr -> Expr
+eval oxms pkt e = 
     case e of
          IR.EBool     b             -> eBool b
          IR.EBit      w v           -> eBit w v
@@ -267,10 +268,12 @@ eval oxms e =
          IR.EVar      "xxreg1"  _   -> eBit 128 $ getxxreg 1
          IR.EVar      "xxreg2"  _   -> eBit 128 $ getxxreg 2
          IR.EVar      "xxreg3"  _   -> eBit 128 $ getxxreg 3
-         IR.ESlice    x h l         -> eSlice (eval oxms x) h l
-         IR.EBinOp    op x1 x2      -> eBinOp op (eval oxms x1) (eval oxms x2)
-         IR.EUnOp     op x          -> eUnOp op $ eval oxms x
-         -- TODO: packet field -> return unevaluated
+         IR.ESlice    x h l         -> eSlice (eval oxms pkt x) h l
+         IR.EBinOp    op x1 x2      -> eBinOp op (eval oxms pkt x1) (eval oxms pkt x2)
+         IR.EUnOp     op x          -> eUnOp op $ eval oxms pkt x
+         IR.EPktField f         _   -> case M.lookup f pkt of
+                                            Nothing -> error $ "Packet does not contain field " ++ show f
+                                            Just x  -> eval oxms pkt x
          _                          -> error $ "Not implemented: OVSProtocol.eval " ++ show e
     where
     getreg i   = case getofreg (i `div` 2) of

@@ -21,6 +21,7 @@ module IR.Compile2IR ( compileSwitch
                      , CompileState
                      , (.+)
                      , val2Record
+                     , struct2Record
                      , val2Scalars
 
                      -- compiler internals exported for use in Builtins.hs
@@ -529,6 +530,17 @@ val2Record r structs rname e@(E (EStruct{})) =
         names = exprTreeFlatten $ fields "" (relRecordType rel) (\_ n -> n)
     in M.fromList $ zip names vals
 val2Record _ _ _ e = error $ "Compile2IR.val2Record " ++ show e
+
+struct2Record :: Refine -> StructReify -> String -> Expr -> I.Record
+struct2Record r structs prefix e@(E (EStruct{..})) = 
+    let ?r = r in
+    let ?s = structs in
+    let vals = mkExpr M.empty CtxRefine e
+        names = exprTreeFlatten $ fields prefix (fromJust $ tdefType $ consType r exprConstructor) (\_ n -> n)
+    in M.fromList $ zip names vals
+struct2Record _ _ _ e = error $ "Compile2IR.struct2Record " ++ show e
+
+
 
 val2Scalars :: Refine -> StructReify -> Expr -> [I.Expr]
 val2Scalars r structs e  = 
