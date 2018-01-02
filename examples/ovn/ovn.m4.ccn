@@ -912,7 +912,7 @@ procedure rportIP(rport : LogicalRouterPort, chassis : chassis_id_t, localGW : b
                 };
 
                 // ARP/ND resolution
-                resolve(rport, chassis, rt.route);
+                resolve(rt.route.outport, chassis, rt.route);
             
                 // gateway redirect
                 the (orport in LogicalRouterPort | match(rt) {SomeRoute{srt} -> orport.id == srt.outport, _ -> false}) {
@@ -1019,12 +1019,12 @@ procedure route(rport : LogicalRouterPort, chassis : chassis_id_t) : opt_route_t
     }
 }
 
-procedure resolve(rport : LogicalRouterPort, chassis : chassis_id_t, route: Route) : () = {
+procedure resolve(rport : lrouter_port_id_t, chassis : chassis_id_t, route: Route) : () = {
     // TODO: only consider addresses on the attached logical switch
     the (addr in LPortMACIP | SomeIPAddr{addr.ip} == route.nexthop) {
         pkt.dst = addr.mac
     } default {
-        the (addr in LearnedAddress | addr.rport == rport.id and SomeIPAddr{addr.ip} == route.nexthop) {
+        the (addr in LearnedAddress | addr.rport == rport and SomeIPAddr{addr.ip} == route.nexthop) {
             pkt.dst = addr.mac
         } default {
             pkt.dst = 0 // address unknown
