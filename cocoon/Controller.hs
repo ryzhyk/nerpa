@@ -139,7 +139,7 @@ cb ref f as pkt = do
          ControllerConnected{..} -> do
              __start s
              (do (Right pkts, _, _, _) <- evalExpr ctlRefine CtxRefine M.empty (Just pkt) ctlDL (eApply f as)
-                 _ <- _commit s
+                 _ <- _commitNotify s
                  return pkts
               `catch` (\e -> do _rollback s `catch` (\e' -> putStrLn $ "Rollback failed: " ++ show (e'::SomeException))
                                 throw (e::SomeException))) 
