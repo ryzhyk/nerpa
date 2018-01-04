@@ -37,8 +37,8 @@ data Backend p = Backend { backendStructs      :: StructReify
                          , backendValidate     :: forall me . (MonadError String me) => Refine -> me ()
                          , backendPrecompile   :: forall me . (MonadError String me) => FilePath -> Refine -> me p
                          , backendStart        :: Refine -> p -> PktCB -> IO ()
-                         , backendBuildSwitch  :: FilePath -> Refine -> Switch -> DL.Fact -> p -> IR.DB -> IO ()
-                         , backendUpdateSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> p -> IR.Delta -> IO ()
+                         , backendBuildSwitch  :: FilePath -> Refine -> DL.Session -> Switch -> DL.Fact -> p -> IR.DB -> IO ()
+                         , backendUpdateSwitch :: FilePath -> Refine -> DL.Session -> Switch -> DL.Fact -> p -> IR.Delta -> IO ()
                          , backendResetSwitch  :: FilePath -> Refine -> Switch -> DL.Fact -> IO ()
                          , backendStop         :: IO ()
                          }

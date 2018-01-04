@@ -9,9 +9,13 @@ port PTunnelPort[TunnelPort](source tunIngress, sink)
 
 procedure vSwitchIngress(port: VSwitchPort): sink = {
     var lport : LogicalSwitchPort;
-    var lpid = the (lb in LPortBinding | lb.vport == port.id) { lb.lport};
+    var lpid = the (lb in LPortBinding 
+                       shard (the (lpc in LPortAtChassis | lpc.lport == lb.lport and lpc.chassis == _switch[31:0]) {true} default {false})
+                   | lb.vport == port.id) { lb.lport};
     if (pkt.vlan.vid == 0) {
-        the (p in LogicalSwitchPort | p.id == lpid and p.enabled) {
+        the (p in LogicalSwitchPort 
+                  shard (the (lpc in LPortAtChassis | lpc.lport == p.id and lpc.chassis == _switch[31:0]) {true} default {false})
+            | p.id == lpid and p.enabled) {
             lport = p
         } default { drop }
     } else {
@@ -82,7 +86,9 @@ function ingressPortSecurity(lport: LogicalSwitchPort, p: Packet): bool = {
     if (ethMulticastAddr(p.src)) {
         false 
     } else { 
-        the (psec in PortSecurityType | psec.lport == lport.id) {
+        the (psec in PortSecurityType 
+                  shard (the (lpc in LPortAtChassis | lpc.lport == psec.lport and lpc.chassis == _switch[31:0]) {true} default {false})
+            | psec.lport == lport.id) {
             if (psec.stype == PortSecNone) { true }
             else {
                 the (psecmac in PortSecurityMAC | psecmac.lport == lport.id and psecmac.mac == p.src) {
@@ -342,7 +348,9 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
             match (pkt.payload) {
                 EthARP{ARPPkt{ARPRequest, spa, tpa, sha, tha}} -> {
                     // ignore requests for sender's own IP
-                    the (lpaddr in LPortMACIP | lpaddr.lport == lport.id and lpaddr.ip == IPAddr4{tpa}) {
+                    the (lpaddr in LPortMACIP 
+                                shard (the (lpc in LPortAtChassis | lpc.lport == lpaddr.lport and lpc.chassis == _switch[31:0]) {true} default {false})
+                        | lpaddr.lport == lport.id and lpaddr.ip == IPAddr4{tpa}) {
                         false
                     } default {
                         the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr4{tpa}) {
@@ -354,7 +362,9 @@ procedure arp(lport : LogicalSwitchPort) : bool = {
                     }
                 },
                 EthIP6{IP6Pkt{_,_,_,_,_,_,_,IPICMP6{ICMP6Pkt{_,_,ICMP6NS{ICMP6NSPkt{target, _}}}}}} -> {
-                    the (lpaddr in LPortMACIP | lpaddr.lport == lport.id and lpaddr.ip == IPAddr6{target}) {
+                    the (lpaddr in LPortMACIP 
+                                shard (the (lpc in LPortAtChassis | lpc.lport == lpaddr.lport and lpc.chassis == _switch[31:0]) {true} default {false})
+                         | lpaddr.lport == lport.id and lpaddr.ip == IPAddr6{target}) {
                         false
                     } default {
                         the (lpaddr in LPortMACIP | lpaddr.lswitch == lport.lswitch and lpaddr.ip == IPAddr6{target}) {
@@ -485,7 +495,9 @@ procedure dstLookup(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
     var dst : destination_t;
     if (ethMulticastAddr(pkt.dst)) {
         /* fork to all chassis that host this switch */
-        fork (lschassis in LSwitchAtChassis | lschassis.sender == chassis and lschassis.lswitch == lport.lswitch) {
+        fork (lschassis in LSwitchAtChassis 
+                        shard (lschassis.sender == _switch[31:0])
+             | lschassis.sender == chassis and lschassis.lswitch == lport.lswitch) {
             dst = lschassis.chassis
         }
     } else {
@@ -494,7 +506,9 @@ procedure dstLookup(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
             dst = mchassis.chassis
         } default {
             /* destination unknown: send to all chassis that host ports with unknown addresses */
-            fork (uchassis in UnknownMACChassis | uchassis.sender == chassis and uchassis.lswitch == lport.lswitch) {
+            fork (uchassis in UnknownMACChassis     
+                           shard (uchassis.sender == _switch[31:0])
+                 | uchassis.sender == chassis and uchassis.lswitch == lport.lswitch) {
                 dst = uchassis.chassis
             }
         }
@@ -528,20 +542,26 @@ procedure vSwitchEgress(local : bool, chassis: chassis_id_t, lswitch : lswitch_i
     var lport : lport_id_t;
     if (ethMulticastAddr(pkt.dst)) {
         if (local) {
-            fork(lp in LPortAtChassis | lp.lswitch == lswitch and lp.chassis == chassis) {
+            fork(lp in LPortAtChassis 
+                    shard (lp.chassis == _switch[31:0])
+                | lp.lswitch == lswitch and lp.chassis == chassis) {
                 lport = lp.lport
             }
         } else {
-            fork(lp in LPortAtChassis | lp.lswitch == lswitch and lp.chassis == chassis and (not lp.float)) {
+            fork(lp in LPortAtChassis 
+                    shard (lp.chassis == _switch[31:0])
+                | lp.lswitch == lswitch and lp.chassis == chassis and (not lp.float)) {
                 lport = lp.lport
             }
         }
     } else {
         /* unicast - deliver to port that owns the address, or to all ports with unknown addresses */
-        the (lp in LPortMACChassis | lp.lswitch == lswitch and 
-                                     lp.chassis == chassis and 
-                                     lp.mac == pkt.dst and 
-                                     (lp.float => local)) {
+        the (lp in LPortMACChassis 
+                shard (lp.chassis == _switch[31:0])
+            | lp.lswitch == lswitch and 
+              lp.chassis == chassis and 
+              lp.mac == pkt.dst and 
+              (lp.float => local)) {
             lport = lp.lport
         } default {
             /* destination unknown: send to all chassis that host ports with unknown addresses */
@@ -556,7 +576,9 @@ procedure vSwitchEgress(local : bool, chassis: chassis_id_t, lswitch : lswitch_i
             }
         }
     };
-    the (lp in LogicalSwitchPort | lp.id == lport) {
+    the (lp in LogicalSwitchPort 
+            shard (the (lpc in LPortAtChassis | lpc.lport == lp.id and lpc.chassis == _switch[31:0]) {true} default {false})
+        | lp.id == lport) {
         lportEgress(lp, chassis)
     }
 }
@@ -593,8 +615,12 @@ procedure deliver(lport : LogicalSwitchPort, chassis : chassis_id_t): sink = {
         LPortVIF{p,_,t}         -> { pkt.vlan.vid = t; p },  
         _                       -> lport.id
     };
-    the (lb in LPortBinding | lb.lport == lp) {
-        the (vport in VSwitchPort | vport.id == lb.vport and vport.switch == chassis) { 
+    the (lb in LPortBinding 
+            shard (the (vp in VSwitchPort | vp.switch == _switch[31:0] and vp.id == lb.vport) {true} default {false} ) 
+        | lb.lport == lp) {
+        the (vport in VSwitchPort 
+                   shard (vport.switch == _switch[31:0])
+            | vport.id == lb.vport and vport.switch == chassis) { 
             send PVSwitchPort[vport].out 
         }
     }
@@ -634,7 +660,9 @@ function egressPortSecurity(lport: LogicalSwitchPort, p: Packet): bool = {
     } else if (ethMulticastAddr(p.dst)) {
         true 
     } else { 
-        the (psec in PortSecurityType | psec.lport == lport.id) {
+        the (psec in PortSecurityType 
+                  shard (the (lpc in LPortAtChassis | lpc.lport == psec.lport and lpc.chassis == _switch[31:0]) {true} default {false})
+            | psec.lport == lport.id) {
             if (psec.stype == PortSecNone) { true }
             else {
                 the (psecmac in PortSecurityMAC | psecmac.lport == lport.id and psecmac.mac == p.dst) {

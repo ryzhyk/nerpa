@@ -16,7 +16,8 @@ limitations under the License.
 -}
 {-# LANGUAGE RecordWildCards, FlexibleContexts #-}
 
-module NS(lookupType, checkType, getType,
+module NS(sWITCH_ID_NAME, sWITCH_ID_TYPE,
+          lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
           lookupVar, checkVar, getVar,
           lookupSwitch, checkSwitch, getSwitch,
@@ -45,6 +46,13 @@ import {-# SOURCE #-} Type
 import {-# SOURCE #-} Builtins
 
 packetTypeName = "Packet"
+
+-- switch id variable used in shard clauses
+sWITCH_ID_NAME :: String
+sWITCH_ID_NAME = "_switch"
+
+sWITCH_ID_TYPE :: Type
+sWITCH_ID_TYPE = tBit 64
 
 lookupType :: Refine -> String -> Maybe TypeDef
 lookupType Refine{..} n = find ((==n) . name) refineTypes
@@ -196,11 +204,14 @@ ctxMVars r ctx =
          CtxUnOp _ _              -> ([], plvars ++ prvars)
          CtxForCond e _           -> ([], (frkvar e) : (plvars ++ prvars))
          CtxForBody e _           -> ((frkvar e) : plvars, prvars)
+         CtxForkShard e _         -> ([], [swvar, frkvar e])
          CtxForkCond e _          -> ([], (frkvar e) : (plvars ++ prvars))
          CtxForkBody e _          -> ((frkvar e):plvars, prvars)
+         CtxWithShard e _         -> ([], [swvar, frkvar e])
          CtxWithCond e _          -> ([], (frkvar e) : (plvars ++ prvars))
          CtxWithBody e _          -> ((frkvar e) : plvars, prvars)
          CtxWithDef _ _           -> (plvars, prvars)
+         CtxAnyShard e _          -> ([], [swvar, frkvar e])
          CtxAnyCond e _           -> ([], (frkvar e) : (plvars ++ prvars))
          CtxAnyBody e _           -> ((frkvar e) : plvars, prvars)
          CtxAnyDef _ _            -> (plvars, prvars)
@@ -213,6 +224,7 @@ ctxMVars r ctx =
          CtxApplyLambdaArg _ _ _  -> ([], plvars ++ prvars)
     where (plvars, prvars) = ctxMVars r $ ctxParent ctx 
           frkvar e = (exprFrkVar e, Just $ relRecordType $ getRelation r $ exprTable e)
+          swvar = (sWITCH_ID_NAME, Just sWITCH_ID_TYPE)
           vartypes :: [(String, ECtx)] -> [MField]
           vartypes vs = map (\gr -> case filter (isJust . snd) $ map (mapSnd $ ctxExpectType r) gr of
                                          []  -> (fst $ head gr, Nothing)

@@ -402,35 +402,35 @@ data Selection = First
 
 type FPipeline = C.Expr -> Pipeline
 
-data Node = Fork   {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: ([ColName], FPipeline), nodeBB :: BB}  -- list of vars fork condition depends on (prevents these var from being optimized away)
-          | Lookup {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: ([ColName], FPipeline), nodeThen :: BB, nodeElse :: BB, nodeSelection :: Selection}
+data Node = Fork   {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: ([ColName], FPipeline), nodeCtx :: Maybe C.ECtx, nodeBB :: BB}  -- list of vars fork condition depends on (prevents these var from being optimized away)
+          | Lookup {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: ([ColName], FPipeline), nodeCtx :: Maybe C.ECtx, nodeThen :: BB, nodeElse :: BB, nodeSelection :: Selection}
           | Cond   {nodeConds :: [(Expr, BB)]}
           | Par    {nodeBBs :: [BB]}
 
 mapBB :: (BB -> BB) -> Node -> Node
-mapBB f (Fork r vs pl bb)          = Fork r vs pl $ f bb
-mapBB f (Lookup r vs pl bb1 bb2 s) = Lookup r vs pl (f bb1) (f bb2) s
-mapBB f (Cond cs)                  = Cond $ map (mapSnd f) cs
-mapBB f (Par bs)                   = Par $ map f bs
+mapBB f (Fork r vs pl ctx bb)          = Fork r vs pl ctx $ f bb
+mapBB f (Lookup r vs pl ctx bb1 bb2 s) = Lookup r vs pl ctx (f bb1) (f bb2) s
+mapBB f (Cond cs)                      = Cond $ map (mapSnd f) cs
+mapBB f (Par bs)                       = Par $ map f bs
 
 nodeVars :: Node -> [VarName]
-nodeVars (Fork _ vs _ b)         = nub $ vs ++ bbVars b
-nodeVars (Lookup _ vs _ b1 b2 _) = nub $ vs ++ bbVars b1 ++ bbVars b2
-nodeVars (Cond cs)               = nub $ concatMap (\(c,b) -> exprVars c ++ bbVars b) cs 
-nodeVars (Par bs)                = nub $ concatMap bbVars bs
+nodeVars (Fork _ vs _ _ b)         = nub $ vs ++ bbVars b
+nodeVars (Lookup _ vs _ _ b1 b2 _) = nub $ vs ++ bbVars b1 ++ bbVars b2
+nodeVars (Cond cs)                 = nub $ concatMap (\(c,b) -> exprVars c ++ bbVars b) cs 
+nodeVars (Par bs)                  = nub $ concatMap bbVars bs
 
 nodeCols :: Node -> [VarName]
-nodeCols (Fork _ _ _ b)          = nub $ bbCols b
-nodeCols (Lookup _ _ _ b1 b2 _)  = nub $ bbCols b1 ++ bbCols b2
-nodeCols (Cond cs)               = nub $ concatMap (\(c,b) -> exprCols c ++ bbCols b) cs 
-nodeCols (Par bs)                = nub $ concatMap bbCols bs
+nodeCols (Fork _ _ _ _ b)          = nub $ bbCols b
+nodeCols (Lookup _ _ _ _ b1 b2 _)  = nub $ bbCols b1 ++ bbCols b2
+nodeCols (Cond cs)                 = nub $ concatMap (\(c,b) -> exprCols c ++ bbCols b) cs 
+nodeCols (Par bs)                  = nub $ concatMap bbCols bs
 
 instance PP Node where 
-    pp (Fork t vs _ b)             = ("fork(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp b)
-    pp (Lookup t vs _ th el First) = ("first(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
-    pp (Lookup t vs _ th el Rand)  = ("rand(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
-    pp (Cond cs)                   = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
-    pp (Par bs)                    = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
+    pp (Fork t vs _ _ b)             = ("fork(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp b)
+    pp (Lookup t vs _ _ th el First) = ("first(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
+    pp (Lookup t vs _ _ th el Rand)  = ("rand(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
+    pp (Cond cs)                     = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
+    pp (Par bs)                      = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
 
 instance Show Node where
     show = render . pp 
@@ -495,11 +495,11 @@ ctxSuc cfg ctx | isNxtCtx  ctx = bbSuc bb
     case ctx of
          CtxNode       nd -> nub $
              case node of 
-                  Fork _ _ _ b       -> [bbEntry (CtxForkAct nd) (CtxForkNxt nd) b]
-                  Lookup _ _ _ t e _ -> [ bbEntry (CtxLookupThenAct nd) (CtxLookupThenNxt nd) t
-                                        , bbEntry (CtxLookupDefAct nd) (CtxLookupDefNxt nd) e]
-                  Cond cs            -> mapIdx (\(_, b) i -> bbEntry (CtxCondAct nd i) (CtxCondNxt nd i) b) cs
-                  Par bs             -> mapIdx (\b i -> bbEntry (CtxParAct nd i) (CtxParNxt nd i) b) bs
+                  Fork _ _ _ _ b       -> [bbEntry (CtxForkAct nd) (CtxForkNxt nd) b]
+                  Lookup _ _ _ _ t e _ -> [ bbEntry (CtxLookupThenAct nd) (CtxLookupThenNxt nd) t
+                                          , bbEntry (CtxLookupDefAct nd) (CtxLookupDefNxt nd) e]
+                  Cond cs              -> mapIdx (\(_, b) i -> bbEntry (CtxCondAct nd i) (CtxCondNxt nd i) b) cs
+                  Par bs               -> mapIdx (\b i -> bbEntry (CtxParAct nd i) (CtxParNxt nd i) b) bs
          CtxForkAct       nd a   | a+1 < length bbActions -> [CtxForkAct nd (a+1)]
                                  | otherwise              -> [CtxForkNxt nd]
          CtxLookupThenAct nd a   | a+1 < length bbActions -> [CtxLookupThenAct nd (a+1)]
@@ -560,11 +560,11 @@ nodePre cfg nd = nub $ concatMap nodePre' $ G.pre cfg nd
     where 
     nodePre' :: G.Node -> [CFGCtx]
     nodePre' nd' = case fromJust $ G.lab cfg nd' of
-                        Fork _ _ _ _       -> [CtxForkNxt nd']
-                        Lookup _ _ _ t e _ -> (if bbNext t == Goto nd then [CtxLookupThenNxt nd'] else []) ++ 
-                                              (if bbNext e == Goto nd then [CtxLookupDefNxt nd'] else [])
-                        Cond cs            -> concat $ mapIdx (\(_, b) i -> if bbNext b == Goto nd then [CtxCondNxt nd' i] else []) cs
-                        Par bs             -> concat $ mapIdx (\b i -> if bbNext b == Goto nd then [CtxParNxt nd' i] else []) bs
+                        Fork _ _ _ _ _       -> [CtxForkNxt nd']
+                        Lookup _ _ _ _ t e _ -> (if bbNext t == Goto nd then [CtxLookupThenNxt nd'] else []) ++ 
+                                                (if bbNext e == Goto nd then [CtxLookupDefNxt nd'] else [])
+                        Cond cs              -> concat $ mapIdx (\(_, b) i -> if bbNext b == Goto nd then [CtxCondNxt nd' i] else []) cs
+                        Par bs               -> concat $ mapIdx (\b i -> if bbNext b == Goto nd then [CtxParNxt nd' i] else []) bs
 
 -- match - add context to result set and stop following the branch
 -- abort - stop following the branch
@@ -603,10 +603,10 @@ nodeMapCtxM g f h cfg nd = do
     let (Just (pre, _, node, suc), cfg_) = G.match nd cfg
     node' <- g nd node
     node'' <- case node' of
-                   Fork t vs pl b         -> (liftM $ Fork t vs pl) $ bbMapCtxM f h (CtxForkAct nd) (CtxForkNxt nd) b
-                   Lookup t vs pl th el s -> (liftM2 $ \th' el' -> Lookup t vs pl th' el' s) 
-                                                (bbMapCtxM f h (CtxLookupThenAct nd) (CtxLookupThenNxt nd) th) 
-                                                (bbMapCtxM f h (CtxLookupDefAct nd) (CtxLookupDefNxt nd) el)
+                   Fork t vs pl ctx b         -> (liftM $ Fork t vs pl ctx) $ bbMapCtxM f h (CtxForkAct nd) (CtxForkNxt nd) b
+                   Lookup t vs pl ctx th el s -> (liftM2 $ \th' el' -> Lookup t vs pl ctx th' el' s) 
+                                                    (bbMapCtxM f h (CtxLookupThenAct nd) (CtxLookupThenNxt nd) th) 
+                                                    (bbMapCtxM f h (CtxLookupDefAct nd) (CtxLookupDefNxt nd) el)
                    Cond cs                -> liftM Cond $ mapIdxM (\(c,b) i -> liftM (c,) $ bbMapCtxM f h (CtxCondAct nd i) (CtxCondNxt nd i)b) cs
                    Par bs                 -> liftM Par $ mapIdxM (\b i -> bbMapCtxM f h (CtxParAct nd i) (CtxParNxt nd i) b) bs
     return $ (pre, nd, node'', suc) G.& cfg_

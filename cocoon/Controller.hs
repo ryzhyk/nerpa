@@ -409,7 +409,7 @@ sync = do
     --  * send commands to the switch via ovs-ofctl (starting with resetting to clean state)
     failed <- liftM (map fst . filter (not . snd) . concat)
               $ mapM (\sw -> mapM (\f -> let swid = DL.factSwitchId ctlRefine (switchRel sw) f in
-                                         (do (backendBuildSwitch ctlBackend) ctlWorkDir ctlRefine sw f ctlIR reldb
+                                         (do (backendBuildSwitch ctlBackend) ctlWorkDir ctlRefine ctlDL sw f ctlIR reldb
                                              return ((name sw, swid), True))
                                          `catch` (\(SomeException e) -> do putStrLn $ "Failed to initialize switch " ++ name sw ++ "(switch id:" ++ show swid ++ "): " ++ show e
                                                                            return ((name sw, swid), False)))
@@ -423,7 +423,7 @@ sync = do
     failed' <- liftM ((failed ++) . map fst . filter (not . snd) . concat)
                $ mapM (\sw -> do swfacts <- liftM (map (\f -> (DL.factSwitchId ctlRefine (switchRel sw) f, f))) $ DL.enumRelation ctlDL (switchRel sw) 
                                  let swfacts' = filter (\(swid, _) -> isNothing $ find (==(name sw, swid)) failed) swfacts
-                                 mapM (\(swid, f) -> do (backendUpdateSwitch ctlBackend) ctlWorkDir ctlRefine sw f ctlIR delta
+                                 mapM (\(swid, f) -> do (backendUpdateSwitch ctlBackend) ctlWorkDir ctlRefine ctlDL sw f ctlIR delta
                                                         return ((name sw, swid), True)
                                                      `catch` (\(SomeException e) -> do putStrLn $ "Failed to update switch " ++ name sw ++ " (switch id:" ++ show swid ++ "): " ++ show e
                                                                                        return ((name sw,swid), False)))

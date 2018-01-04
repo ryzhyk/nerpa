@@ -112,13 +112,16 @@ exprFoldCtxM' f ctx e@(EBinOp p op l r)       = f ctx =<< (liftM2 $ EBinOp p op)
 exprFoldCtxM' f ctx e@(EUnOp p op x)          = f ctx =<< (liftM $ EUnOp p op) (exprFoldCtxM f (CtxUnOp e ctx) x)
 exprFoldCtxM' f ctx e@(EFor p v t c b)        = f ctx =<< (liftM2 $ EFor p v t) (exprFoldCtxM f (CtxForCond e ctx) c) 
                                                                                 (exprFoldCtxM f (CtxForBody e ctx) b)
-exprFoldCtxM' f ctx e@(EFork p v t c b)       = f ctx =<< (liftM2 $ EFork p v t) (exprFoldCtxM f (CtxForkCond e ctx) c) 
+exprFoldCtxM' f ctx e@(EFork p v t s c b)     = f ctx =<< (liftM3 $ EFork p v t) (mapM (exprFoldCtxM f (CtxForkShard e ctx)) s) 
+                                                                                 (exprFoldCtxM f (CtxForkCond e ctx) c) 
                                                                                  (exprFoldCtxM f (CtxForkBody e ctx) b)
-exprFoldCtxM' f ctx e@(EWith p v t c b d)     = f ctx =<< (liftM3 $ EWith p v t) 
+exprFoldCtxM' f ctx e@(EWith p v t s c b d)   = f ctx =<< (liftM4 $ EWith p v t) 
+                                                          (mapM (exprFoldCtxM f (CtxWithShard e ctx)) s) 
                                                           (exprFoldCtxM f (CtxWithCond e ctx) c) 
                                                           (exprFoldCtxM f (CtxWithBody e ctx) b)    
                                                           (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxWithDef e ctx)) d)
-exprFoldCtxM' f ctx e@(EAny p v t c b d)      = f ctx =<< (liftM3 $ EAny p v t) 
+exprFoldCtxM' f ctx e@(EAny p v t s c b d)    = f ctx =<< (liftM4 $ EAny p v t) 
+                                                          (mapM (exprFoldCtxM f (CtxAnyShard e ctx)) s) 
                                                           (exprFoldCtxM f (CtxAnyCond e ctx) c) 
                                                           (exprFoldCtxM f (CtxAnyBody e ctx) b)    
                                                           (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxAnyDef e ctx)) d)
@@ -159,9 +162,9 @@ exprMapM g e = case e of
                    EBinOp p op l r     -> (liftM2 $ EBinOp p op) (g l) (g r)
                    EUnOp p op v        -> (liftM $ EUnOp p op) (g v)
                    EFor p v t c b      -> (liftM2 $ EFor p v t) (g c) (g b)
-                   EFork p v t c b     -> (liftM2 $ EFork p v t) (g c) (g b)
-                   EWith p v t c b d   -> (liftM3 $ EWith p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
-                   EAny p v t c b d    -> (liftM3 $ EAny p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
+                   EFork p v t s c b   -> (liftM3 $ EFork p v t) (mapM g s) (g c) (g b)
+                   EWith p v t s c b d -> (liftM4 $ EWith p v t) (mapM g s) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
+                   EAny p v t s c b d  -> (liftM4 $ EAny p v t) (mapM g s) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
                    EPHolder p          -> return $ EPHolder p
                    EAnon p             -> return $ EAnon p
                    ETyped p v t        -> (liftM $ \v' -> ETyped p v' t) (g v)
@@ -223,11 +226,14 @@ exprCollectCtxM f op ctx e = exprFoldCtxM g ctx e
                                      EBinOp _ _ l r        -> x' `op` l `op` r  
                                      EUnOp _ _ v           -> x' `op` v
                                      EFor _ _ _ c b        -> x' `op` c `op` b
-                                     EFork _ _ _ c b       -> x' `op` c `op` b
-                                     EWith _ _ _ c b d     -> let x'' = x' `op` c `op` b in
-                                                              maybe x'' (x'' `op`) d
-                                     EAny _ _ _ c b d      -> let x'' = x' `op` c `op` b in
-                                                              maybe x'' (x'' `op`) d
+                                     EFork _ _ _ s c b     -> let x'' = x' `op` c `op` b    
+                                                              in maybe x'' (x'' `op`) s
+                                     EWith _ _ _ s c b d   -> let x'' = x' `op` c `op` b
+                                                                  x''' = maybe x'' (x'' `op`) s
+                                                              in maybe x''' (x''' `op`) d
+                                     EAny _ _ _ s c b d    -> let x'' = x' `op` c `op` b
+                                                                  x''' = maybe x'' (x'' `op`) s
+                                                              in maybe x''' (x''' `op`) d
                                      EPHolder _            -> x'
                                      EAnon _               -> x'
                                      ETyped _ v _          -> x' `op` v
@@ -298,8 +304,8 @@ exprIsDeterministic r e = exprIsDeterministic' e &&
 
 exprIsDeterministic' :: Expr -> Bool
 exprIsDeterministic' e = exprCollect (\case
-                                       EAny _ _ _ _ _ _ -> False
-                                       _                -> True) (&&) e
+                                       EAny _ _ _ _ _ _ _ -> False
+                                       _                  -> True) (&&) e
 
 exprIsMulticast :: Refine -> Expr -> Bool
 exprIsMulticast r e = exprIsMulticast' e || 
@@ -307,9 +313,9 @@ exprIsMulticast r e = exprIsMulticast' e ||
 
 exprIsMulticast' :: Expr -> Bool
 exprIsMulticast' e = exprCollect (\case
-                                   EPar _ _ _      -> True
-                                   EFork _ _ _ _ _ -> True
-                                   _               -> False) (||) e
+                                   EPar _ _ _        -> True
+                                   EFork _ _ _ _ _ _ -> True
+                                   _                 -> False) (||) e
 
 exprSendsToPorts :: Refine -> Expr -> [DirPort]
 exprSendsToPorts r e = nub $ exprSendsToPorts' e ++
@@ -419,7 +425,8 @@ exprInline' r skip ctx e@(EApply _ f as) | elem f skip    = E e
           -- rename local vars; substitute arguments
           subst v = case findIndex ((==v) . name) funcArgs of
                          Just i  -> as !! i
-                         Nothing -> eVar $ f ++ ":" ++ v
+                         Nothing | v == sWITCH_ID_NAME -> eVar v
+                                 | otherwise           -> eVar $ f ++ ":" ++ v
           vsubst v = f ++ ":" ++ v
 exprInline' r skip ctx (EField _ (E (EStruct _ c fs)) f) = exprInline r skip ctx v
     where v = fs !! (fromJust $ findIndex ((== f) . name) $ consArgs $ getConstructor r c)
@@ -454,6 +461,7 @@ expr2Statement_ r ctx e = do let orig = exprMap fst e
                              return (E orig, (p, e'))
 
 expr2Statement' :: Refine -> ECtx -> ENode -> ExprNode ([Expr], Expr) -> State Int ([Expr], Expr)
+expr2Statement' _ ctx e _ | ctxInShard ctx             = return ([], E e)
 expr2Statement' _ _   _ (EBuiltin _ f as)              = return (concatMap fst as, eBuiltin f $ map snd as)
 expr2Statement' _ _   _ (EApply _ f as)                = return (concatMap fst as, eApply f $ map snd as)
 expr2Statement' _ _   _ (EField _ (p,e) f)             = return (p, exprModifyResult (\e' -> eField e' f) e)
@@ -480,12 +488,12 @@ expr2Statement' r ctx e (EVarDecl _ vn) | operand ctx  = return ([eTyped (eVarDe
 expr2Statement' _ ctx _ (ESeq _ (p1,e1) (p2,e2)) | operand ctx = return (p1++[e1]++p2, e2)
                                                  | otherwise   = return ([], exprSequence $ p1 ++ [e1] ++ p2 ++ [e2])
 expr2Statement' _ _   _ (EPar _ e1 e2)                 = return ([], ePar (prefMerge e1) (prefMerge e2))
-expr2Statement' r ctx e (EWith _ v t c b md)           = exprPrecomputeVar ctx (extype r ctx $ E e) e'
-    where e' = eWith v t (prefMerge c) (prefMerge b) (fmap prefMerge md)
-expr2Statement' r ctx e (EAny _ v t c b md)            = exprPrecomputeVar ctx (exprType r ctx $ E e) e'
-    where e' = eAny  v t (prefMerge c) (prefMerge b) (fmap prefMerge md)
+expr2Statement' r ctx e (EWith _ v t s c b md)         = exprPrecomputeVar ctx (extype r ctx $ E e) e'
+    where e' = eWith v t (prefMerge <$> s) (prefMerge c) (prefMerge b) (fmap prefMerge md)
+expr2Statement' r ctx e (EAny _ v t s c b md)          = exprPrecomputeVar ctx (exprType r ctx $ E e) e'
+    where e' = eAny  v t (prefMerge <$> s) (prefMerge c) (prefMerge b) (fmap prefMerge md)
 expr2Statement' _ _   _ (EFor _ v t c b)               = return ([], eFor v t (prefMerge c) (prefMerge b))
-expr2Statement' _ _   _ (EFork _ v t c b)              = return ([], eFork v t (prefMerge c) (prefMerge b))
+expr2Statement' _ _   _ (EFork _ v t s c b)            = return ([], eFork v t (prefMerge <$> s) (prefMerge c) (prefMerge b))
 expr2Statement' _ _   e EVar{}                         = return ([], E e)
 expr2Statement' _ _   e EPacket{}                      = return ([], E e)
 expr2Statement' _ _   e EBool{}                        = return ([], E e)
@@ -518,13 +526,13 @@ exprModifyResult :: (Expr -> Expr) -> Expr -> Expr
 exprModifyResult f (E e) = exprModifyResult' f e
 
 exprModifyResult' :: (Expr -> Expr) -> ENode -> Expr
-exprModifyResult' f (EMatch _ m cs)      = eMatch m $ map (mapSnd $ exprModifyResult f) cs
-exprModifyResult' f (ESet _ e1 e2)       = exprSequence [eSet e1 e2, f $ eTuple []]
-exprModifyResult' f (ESeq _ e1 e2)       = eSeq e1 $ exprModifyResult f e2
-exprModifyResult' f (EITE _ i t me)      = eITE i (exprModifyResult f t) (fmap (exprModifyResult f) me)
-exprModifyResult' f (EWith _ v t c b md) = eWith v t c (exprModifyResult f b) (fmap (exprModifyResult f) md)
-exprModifyResult' f (EAny _ v t c b md)  = eAny v t c (exprModifyResult f b) (fmap (exprModifyResult f) md)
-exprModifyResult' f e                    = f $ E e
+exprModifyResult' f (EMatch _ m cs)        = eMatch m $ map (mapSnd $ exprModifyResult f) cs
+exprModifyResult' f (ESet _ e1 e2)         = exprSequence [eSet e1 e2, f $ eTuple []]
+exprModifyResult' f (ESeq _ e1 e2)         = eSeq e1 $ exprModifyResult f e2
+exprModifyResult' f (EITE _ i t me)        = eITE i (exprModifyResult f t) (fmap (exprModifyResult f) me)
+exprModifyResult' f (EWith _ v t s c b md) = eWith v t s c (exprModifyResult f b) (fmap (exprModifyResult f) md)
+exprModifyResult' f (EAny _ v t s c b md)  = eAny v t s c (exprModifyResult f b) (fmap (exprModifyResult f) md)
+exprModifyResult' f e                      = f $ E e
 
 exprPrecomputeVar :: ECtx -> Type -> Expr -> State Int ([Expr], Expr)
 exprPrecomputeVar ctx t e | operand ctx = do v <- allocVar
@@ -657,13 +665,13 @@ exprIsStatement _                             = False
 
 exprVarSubst :: (String -> Expr) -> (String -> String) -> Expr -> Expr
 exprVarSubst f h e = exprFold g e
-    where g (EVar _ v)          = f v
-          g (EVarDecl p v)      = E $ EVarDecl p $ h v
-          g (EWith p v t c b d) = E $ EWith p (h v) t c b d
-          g (EAny p v t c b d)  = E $ EAny p (h v) t c b d
-          g (EFork p v t c b)   = E $ EFork p (h v) t c b
-          g (EFor p v t c b)    = E $ EFor p (h v) t c b
-          g e'                  = E e'
+    where g (EVar _ v)            = f v
+          g (EVarDecl p v)        = E $ EVarDecl p $ h v
+          g (EWith p v t s c b d) = E $ EWith p (h v) t s c b d
+          g (EAny p v t s c b d)  = E $ EAny p (h v) t s c b d
+          g (EFork p v t s c b)   = E $ EFork p (h v) t s c b
+          g (EFor p v t c b)      = E $ EFor p (h v) t c b
+          g e'                    = E e'
 
 exprVarRename :: (String -> String) -> Expr -> Expr
 exprVarRename f e = exprFold g e

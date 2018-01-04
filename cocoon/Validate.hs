@@ -512,21 +512,21 @@ exprValidate1 r ctx (ESend p _)         = ctxCheckSideEffects p r ctx
 exprValidate1 _ _   (EBinOp _ _ _ _)    = return ()
 exprValidate1 _ _   (EUnOp _ Not _)     = return ()
 exprValidate1 _ _   (EUnOp _ BNeg _)    = return ()
-exprValidate1 r ctx (EFork p v t _ _)   = do ctxCheckSideEffects p r ctx
+exprValidate1 r ctx (EFork p v t _ _ _) = do ctxCheckSideEffects p r ctx
                                              _ <- checkRelation p r ctx t
                                              _ <- checkNoVar p r ctx v
                                              return ()
-exprValidate1 r ctx (EFor p v t _ _)   = do ctxCheckNotDataplane p ctx
-                                            _ <- checkRelation p r ctx t
-                                            _ <- checkNoVar p r ctx v
-                                            return ()
-exprValidate1 r ctx (EWith p v t _ _ _) = do _ <- checkRelation p r ctx t
-                                             _ <- checkNoVar p r ctx v
-                                             return ()
-exprValidate1 r ctx (EAny  p v t _ _ _) = do ctxCheckSideEffects p r ctx
+exprValidate1 r ctx (EFor p v t _ _)    = do ctxCheckNotDataplane p ctx
                                              _ <- checkRelation p r ctx t
                                              _ <- checkNoVar p r ctx v
                                              return ()
+exprValidate1 r ctx (EWith p v t _ _ _ _) = do _ <- checkRelation p r ctx t
+                                               _ <- checkNoVar p r ctx v
+                                               return ()
+exprValidate1 r ctx (EAny  p v t _ _ _ _) = do ctxCheckSideEffects p r ctx
+                                               _ <- checkRelation p r ctx t
+                                               _ <- checkNoVar p r ctx v
+                                               return ()
 exprValidate1 _ _   (EPHolder _)        = return ()
 exprValidate1 r ctx (EAnon p)           = assertR r (isJust $ ctxInDelete ctx) p "\"?\" only allowed in lambda-expressions"
 exprValidate1 r _   (ETyped _ _ t)      = typeValidate r t
@@ -635,8 +635,11 @@ ctxCheckSideEffects p r ctx =
          CtxITEIf _ _      -> complain
          CtxSetL _ _       -> complain
          CtxSend  _ _      -> complain
+         CtxForkShard _ _  -> complain
          CtxForkCond _ _   -> complain
+         CtxWithShard _ _  -> complain
          CtxWithCond _ _   -> complain
+         CtxAnyShard _ _   -> complain
          CtxAnyCond _ _    -> complain
          CtxRelPred _ _ _  -> complain
          CtxRefine         -> complain
@@ -648,10 +651,13 @@ ctxCheckSideEffects p r ctx =
 ctxCheckPkt :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckPkt p r ctx =
     case ctx of 
-         CtxFunc f _       -> when (funcPure f) complain
-         CtxRelPred _ _ _  -> complain
-         CtxRefine         -> complain
-         _                 -> ctxCheckPkt p r (ctxParent ctx)
+         CtxFunc f _    -> when (funcPure f) complain
+         CtxWithShard{} -> complain
+         CtxAnyShard{}  -> complain
+         CtxForkShard{} -> complain
+         CtxRelPred{}   -> complain
+         CtxRefine      -> complain
+         _              -> ctxCheckPkt p r (ctxParent ctx)
     where complain = err p $ "pkt is not available in this context" -- ++ show ctx
 
 

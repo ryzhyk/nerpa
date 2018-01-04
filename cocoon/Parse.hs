@@ -73,6 +73,7 @@ reservedNames = ["_",
                  "references",
                  "refine",
                  "send",
+                 "shard",
                  "source",
                  "state",
                  "string",
@@ -416,6 +417,7 @@ evardcl = eVarDecl <$ reserved "var" <*> varIdent
 efork   = eFork    <$ reserved "fork" 
                    <*> (symbol "(" *> varIdent)
                    <*> (reserved "in" *> relIdent) 
+                   <*> (optionMaybe $ reserved "shard" *> (parens expr)) 
                    <*> ((option eTrue (reservedOp "|" *> expr)) <* symbol ")")
                    <*> term
 efor    = eFor     <$ reserved "for" 
@@ -426,6 +428,7 @@ efor    = eFor     <$ reserved "for"
 ewith   = eWith    <$ reserved "the" 
                    <*> (symbol "(" *> varIdent)
                    <*> (reserved "in" *> relIdent) 
+                   <*> (optionMaybe $ reserved "shard" *> (parens expr)) 
                    <*> ((option eTrue (reservedOp "|" *> expr)) <* symbol ")")
                    <*> term
                    <*> (optionMaybe $ reserved "default" *> term)
@@ -433,6 +436,7 @@ ewith   = eWith    <$ reserved "the"
 eany    = eAny <$ reserved "any" 
                <*> (symbol "(" *> varIdent)
                <*> (reserved "in" *> relIdent) 
+               <*> (optionMaybe $ reserved "shard" *> (parens expr)) 
                <*> ((option eTrue (reservedOp "|" *> expr)) <* symbol ")")
                <*> term
                <*> (optionMaybe $ reserved "default" *> term)

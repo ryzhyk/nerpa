@@ -116,7 +116,7 @@ compilePort' SwitchPort{..} = do
     pl <- get
     let c = eBinOp Eq (eField (eVar key) "portnum") (eField ePacket "portnum")
     let (_, ccols, cpl) = exprDeps M.empty (CtxFunc f CtxRefine) rel entrynd key c pl
-    updateNode entrynd (I.Lookup (name rel) [] (ccols, cpl) (I.BB [] $ I.Call (name f) (relCols rel)) (I.BB [] I.Drop) I.First) []
+    updateNode entrynd (I.Lookup (name rel) [] (ccols, cpl) Nothing (I.BB [] $ I.Call (name f) (relCols rel)) (I.BB [] I.Drop) I.First) []
 
 compileFunc :: StructReify -> FilePath -> Refine -> Function -> I.Pipeline
 compileFunc structs workdir r fun =
@@ -307,16 +307,20 @@ compileQuery vars ctx entrynd exitnd (E e) = do
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
     case e of
-         EFork{} -> updateNode entrynd (I.Fork t cdeps' (ccols, cpl) (I.BB asns $ I.Goto entryndb)) [entryndb]
+         EFork{} -> updateNode entrynd (I.Fork t cdeps' (ccols, cpl) (Just $ CtxForkShard e ctx) (I.BB asns $ I.Goto entryndb)) [entryndb]
          _   -> let sel = case e of
                                EWith{} -> I.First
                                EAny{}  -> I.Rand
-                               _       -> error $ "Compile2IR.compileQuery e=" ++ show e in
+                               _       -> error $ "Compile2IR.compileQuery e=" ++ show e
+                    ctx' = case e of
+                                EWith{} -> CtxWithShard e ctx
+                                EAny{}  -> CtxAnyShard e ctx
+                                _       -> error $ "Compile2IR.compileQuery e=" ++ show e in
                 case md of
                      Just d -> do
                          (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
-                         updateNode entrynd (I.Lookup t cdeps' (ccols, cpl) (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd) sel) [entryndb, entryndd]
-                     Nothing -> updateNode entrynd (I.Lookup t cdeps' (ccols, cpl) (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) sel) [entryndb]
+                         updateNode entrynd (I.Lookup t cdeps' (ccols, cpl) (Just ctx') (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd) sel) [entryndb, entryndd]
+                     Nothing -> updateNode entrynd (I.Lookup t cdeps' (ccols, cpl) (Just ctx') (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop) sel) [entryndb]
     return vars
 
 -- Compile boolean expression and determine its dependencies without changing compilation state

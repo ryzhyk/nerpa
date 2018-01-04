@@ -219,7 +219,8 @@ evalExpr'' ctx e = do
                                                eput kmap)
                                    rows
                              return $ Left $ meTuple []
-        EWith _ v t c b d -> do rows <- lift $ (liftM $ map fact2Row) $ DL.enumRelation ?dl t
+        EWith _ v t _ c b d -> 
+                             do rows <- lift $ (liftM $ map fact2Row) $ DL.enumRelation ?dl t
                                 rows' <- filterM (\row -> do kmap <- eget
                                                              emodify $ M.insert v $ expr2MExpr row
                                                              Left (E c') <- evalExprS (CtxWithCond e ctx) c

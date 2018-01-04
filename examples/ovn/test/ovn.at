@@ -1190,6 +1190,7 @@ ovn_populate_arp
 # Allow some time for ovn-northd and ovn-controller to catch up.
 # XXX This should be more systematic.
 sleep 1
+read -p "continue?"
 
 # Make sure there is no attempt to adding duplicated flows by ovn-controller
 AT_FAIL_IF([test -n "`grep duplicate hv1/ovn-controller.log`"])
@@ -2304,6 +2305,8 @@ ovn_populate_arp
 # Allow some time for ovn-northd and ovn-controller to catch up.
 # XXX This should be more systematic.
 sleep 1
+
+read -p "continue?"
 
 # test_ip INPORT SRC_MAC DST_MAC SRC_IP DST_IP OUTPORT...
 #

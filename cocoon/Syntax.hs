@@ -63,6 +63,7 @@ module Syntax( pktVar
              , ctxIsTyped
              , ctxIsDelete, ctxInDelete
              , ctxIsQueryCond, ctxInQueryCond
+             , ctxIsShard, ctxInShard
              , conj
              , disj
              , exprSequence) where
@@ -533,9 +534,9 @@ data ExprNode e = EVar          {exprPos :: Pos, exprVar :: String}
                 | EBinOp        {exprPos :: Pos, exprBOp :: BOp, exprLeft :: e, exprRight :: e}
                 | EUnOp         {exprPos :: Pos, exprUOp :: UOp, exprOp :: e}
                 | EFor          {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprBody :: e}
-                | EFork         {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprBody :: e}
-                | EWith         {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprBody :: e, exprDef :: Maybe e}
-                | EAny          {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprBody :: e, exprDef :: Maybe e}
+                | EFork         {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprShard :: Maybe e, exprCond :: e, exprBody :: e}
+                | EWith         {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprShard :: Maybe e, exprCond :: e, exprBody :: e, exprDef :: Maybe e}
+                | EAny          {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprShard :: Maybe e, exprCond :: e, exprBody :: e, exprDef :: Maybe e}
                 | EPHolder      {exprPos :: Pos}
                 | EAnon         {exprPos :: Pos}
                 | ETyped        {exprPos :: Pos, exprExpr :: e, exprTSpec :: Type}
@@ -546,42 +547,42 @@ data ExprNode e = EVar          {exprPos :: Pos, exprVar :: String}
                 | EApplyLambda  {exprPos :: Pos, exprLambda :: e, exprArgs :: [e]}
 
 instance Eq e => Eq (ExprNode e) where
-    (==) (EVar _ v1)              (EVar _ v2)                = v1 == v2
-    (==) (EPacket _)              (EPacket _)                = True
-    (==) (EApply _ f1 as1)        (EApply _ f2 as2)          = f1 == f2 && as1 == as2
-    (==) (EBuiltin _ f1 as1)      (EBuiltin _ f2 as2)        = f1 == f2 && as1 == as2
-    (==) (EField _ s1 f1)         (EField _ s2 f2)           = s1 == s2 && f1 == f2
-    (==) (ELocation _ r1 k1 d1)   (ELocation _ r2 k2 d2)     = r1 == r2 && k1 == k2 && d1 == d2
-    (==) (EBool _ b1)             (EBool _ b2)               = b1 == b2
-    (==) (EInt _ i1)              (EInt _ i2)                = i1 == i2
-    (==) (EString _ s1)           (EString _ s2)             = s1 == s2
-    (==) (EBit _ w1 i1)           (EBit _ w2 i2)             = w1 == w2 && i1 == i2
-    (==) (EStruct _ c1 fs1)       (EStruct _ c2 fs2)         = c1 == c2 && fs1 == fs2
-    (==) (ETuple _ fs1)           (ETuple _ fs2)             = fs1 == fs2
-    (==) (ESlice _ e1 h1 l1)      (ESlice _ e2 h2 l2)        = e1 == e2 && h1 == h2 && l1 == l2
-    (==) (EMatch _ e1 cs1)        (EMatch _ e2 cs2)          = e1 == e2 && cs1 == cs2
-    (==) (EVarDecl _ v1)          (EVarDecl _ v2)            = v1 == v2
-    (==) (ESeq _ l1 r1)           (ESeq _ l2 r2)             = l1 == l2 && r1 == r2
-    (==) (EPar _ l1 r1)           (EPar _ l2 r2)             = l1 == l2 && r1 == r2
-    (==) (EITE _ i1 t1 e1)        (EITE _ i2 t2 e2)          = i1 == i2 && t1 == t2 && e1 == e2
-    (==) (EDrop _)                (EDrop _)                  = True
-    (==) (ESet _ l1 r1)           (ESet _ l2 r2)             = l1 == l2 && r1 == r2
-    (==) (ESend _ d1)             (ESend _ d2)               = d1 == d2
-    (==) (EBinOp _ o1 l1 r1)      (EBinOp _ o2 l2 r2)        = o1 == o2 && l1 == l2 && r1 == r2
-    (==) (EUnOp _ o1 e1)          (EUnOp _ o2 e2)            = o1 == o2 && e1 == e2
-    (==) (EFor  _ v1 t1 c1 b1)    (EFor  _ v2 t2 c2 b2)      = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2
-    (==) (EFork _ v1 t1 c1 b1)    (EFork _ v2 t2 c2 b2)      = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2
-    (==) (EWith _ v1 t1 c1 b1 d1) (EWith _ v2 t2 c2 b2 d2)   = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2 && d1 == d2
-    (==) (EAny _ v1 t1 c1 b1 d1)  (EAny _ v2 t2 c2 b2 d2)    = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2 && d1 == d2
-    (==) (EPHolder _)             (EPHolder _)               = True
-    (==) (EAnon _)                (EAnon _)                  = True
-    (==) (ETyped _ e1 t1)         (ETyped _ e2 t2)           = e1 == e2 && t1 == t2
-    (==) (ERelPred _ r1 as1)      (ERelPred _ r2 as2)        = r1 == r2 && as1 == as2
-    (==) (EPut _ r1 v1)           (EPut _ r2 v2)             = r1 == r2 && v1 == v2
-    (==) (EDelete _ r1 c1)        (EDelete _ r2 c2)          = r1 == r2 && c1 == c2
-    (==) (ELambda _ a1 r1 l1)     (ELambda _ a2 r2 l2)       = a1 == a2 && r1 == r2 && l1 == l2
-    (==) (EApplyLambda _ l1 a1)   (EApplyLambda _ l2 a2)     = l1 == l2 && a1 == a2
-    (==) _                        _                          = False
+    (==) (EVar _ v1)                  (EVar _ v2)                    = v1 == v2
+    (==) (EPacket _)                  (EPacket _)                    = True
+    (==) (EApply _ f1 as1)            (EApply _ f2 as2)              = f1 == f2 && as1 == as2
+    (==) (EBuiltin _ f1 as1)          (EBuiltin _ f2 as2)            = f1 == f2 && as1 == as2
+    (==) (EField _ s1 f1)             (EField _ s2 f2)               = s1 == s2 && f1 == f2
+    (==) (ELocation _ r1 k1 d1)       (ELocation _ r2 k2 d2)         = r1 == r2 && k1 == k2 && d1 == d2
+    (==) (EBool _ b1)                 (EBool _ b2)                   = b1 == b2
+    (==) (EInt _ i1)                  (EInt _ i2)                    = i1 == i2
+    (==) (EString _ s1)               (EString _ s2)                 = s1 == s2
+    (==) (EBit _ w1 i1)               (EBit _ w2 i2)                 = w1 == w2 && i1 == i2
+    (==) (EStruct _ c1 fs1)           (EStruct _ c2 fs2)             = c1 == c2 && fs1 == fs2
+    (==) (ETuple _ fs1)               (ETuple _ fs2)                 = fs1 == fs2
+    (==) (ESlice _ e1 h1 l1)          (ESlice _ e2 h2 l2)            = e1 == e2 && h1 == h2 && l1 == l2
+    (==) (EMatch _ e1 cs1)            (EMatch _ e2 cs2)              = e1 == e2 && cs1 == cs2
+    (==) (EVarDecl _ v1)              (EVarDecl _ v2)                = v1 == v2
+    (==) (ESeq _ l1 r1)               (ESeq _ l2 r2)                 = l1 == l2 && r1 == r2
+    (==) (EPar _ l1 r1)               (EPar _ l2 r2)                 = l1 == l2 && r1 == r2
+    (==) (EITE _ i1 t1 e1)            (EITE _ i2 t2 e2)              = i1 == i2 && t1 == t2 && e1 == e2
+    (==) (EDrop _)                    (EDrop _)                      = True
+    (==) (ESet _ l1 r1)               (ESet _ l2 r2)                 = l1 == l2 && r1 == r2
+    (==) (ESend _ d1)                 (ESend _ d2)                   = d1 == d2
+    (==) (EBinOp _ o1 l1 r1)          (EBinOp _ o2 l2 r2)            = o1 == o2 && l1 == l2 && r1 == r2
+    (==) (EUnOp _ o1 e1)              (EUnOp _ o2 e2)                = o1 == o2 && e1 == e2
+    (==) (EFor  _ v1 t1 c1 b1)        (EFor  _ v2 t2 c2 b2)          = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2
+    (==) (EFork _ v1 t1 s1 c1 b1)     (EFork _ v2 t2 s2 c2 b2)       = v1 == v2 && t1 == t2 && s1 == s2 && c1 == c2 && b1 == b2
+    (==) (EWith _ v1 t1 s1 c1 b1 d1)  (EWith _ v2 t2 s2 c2 b2 d2)    = v1 == v2 && t1 == t2 && s1 == s2 && c1 == c2 && b1 == b2 && d1 == d2
+    (==) (EAny _ v1 t1 s1 c1 b1 d1)   (EAny _ v2 t2 s2 c2 b2 d2)     = v1 == v2 && t1 == t2 && s1 == s2 && c1 == c2 && b1 == b2 && d1 == d2
+    (==) (EPHolder _)                 (EPHolder _)                   = True
+    (==) (EAnon _)                    (EAnon _)                      = True
+    (==) (ETyped _ e1 t1)             (ETyped _ e2 t2)               = e1 == e2 && t1 == t2
+    (==) (ERelPred _ r1 as1)          (ERelPred _ r2 as2)            = r1 == r2 && as1 == as2
+    (==) (EPut _ r1 v1)               (EPut _ r2 v2)                 = r1 == r2 && v1 == v2
+    (==) (EDelete _ r1 c1)            (EDelete _ r2 c2)              = r1 == r2 && c1 == c2
+    (==) (ELambda _ a1 r1 l1)         (ELambda _ a2 r2 l2)           = a1 == a2 && r1 == r2 && l1 == l2
+    (==) (EApplyLambda _ l1 a1)       (EApplyLambda _ l2 a2)         = l1 == l2 && a1 == a2
+    (==) _                            _                              = False
 
 instance WithPos (ExprNode e) where
     pos = exprPos
@@ -619,11 +620,11 @@ instance PP e => PP (ExprNode e) where
     pp (EBinOp _ op e1 e2)   = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp _ op e)        = parens $ pp op <+> pp e
     pp (EFor  _ v t c b)     = ("for"  <+> (parens $ pp v <+> "in" <+> pp t <+> "|" <+> pp c)) $$ (nest' $ pp b)
-    pp (EFork _ v t c b)     = ("fork" <+> (parens $ pp v <+> "in" <+> pp t <+> "|" <+> pp c)) $$ (nest' $ pp b)
-    pp (EWith _ v t c b d)   = ("the" <+> (parens $ pp v <+> "in" <+> pp t <+> "|" <+> pp c)) 
+    pp (EFork _ v t s c b)   = ("fork" <+> (parens $ pp v <+> "in" <+> pp t <> (maybe empty ((" shard" <+>) . pp) s) <+> "|" <+> pp c)) $$ (nest' $ pp b)
+    pp (EWith _ v t s c b d) = ("the" <+> (parens $ pp v <+> "in" <+> pp t <> (maybe empty ((" shard" <+>) . pp) s) <+> "|" <+> pp c)) 
                                $$ (nest' $ pp b)
                                $$ (maybe empty (\e -> "default" <+> pp e)  d)
-    pp (EAny _ v t c b d)    = ("any" <+> (parens $ pp v <+> "in" <+> pp t <+> "|" <+> pp c)) 
+    pp (EAny _ v t s c b d)  = ("any" <+> (parens $ pp v <+> "in" <+> pp t <> (maybe empty ((" shard" <+>) . pp) s) <+> "|" <+> pp c)) 
                                $$ (nest' $ pp b)
                                $$ (maybe empty (\e -> "default" <+> pp e)  d)
     pp (EPHolder _)          = "_"
@@ -684,10 +685,10 @@ eSend e             = E $ ESend     nopos e
 eBinOp op l r       = E $ EBinOp    nopos op l r
 eUnOp op e          = E $ EUnOp     nopos op e
 eNot e              = eUnOp Not e
-eFork v t c b       = E $ EFork     nopos v t c b
+eFork v t s c b     = E $ EFork     nopos v t s c b
 eFor  v t c b       = E $ EFor      nopos v t c b
-eWith v t c b d     = E $ EWith     nopos v t c b d
-eAny v t c b d      = E $ EAny      nopos v t c b d
+eWith v t s c b d   = E $ EWith     nopos v t s c b d
+eAny v t s c b d    = E $ EAny      nopos v t s c b d
 ePHolder            = E $ EPHolder  nopos
 eAnon               = E $ EAnon     nopos
 eTyped e t          = E $ ETyped    nopos e t
@@ -756,11 +757,14 @@ data ECtx = CtxRefine
           | CtxUnOp           {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxForCond        {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxForBody        {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxForkShard      {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxForkCond       {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxForkBody       {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxWithShard      {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxWithCond       {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxWithBody       {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxWithDef        {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxAnyShard       {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxAnyCond        {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxAnyBody        {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxAnyDef         {ctxParExpr::ENode, ctxPar::ECtx}
@@ -816,11 +820,14 @@ instance PP ECtx where
                     CtxUnOp{..}           -> "CtxUnOp           " <+> epar
                     CtxForCond{..}        -> "CtxForCond        " <+> epar
                     CtxForBody{..}        -> "CtxForBody        " <+> epar
+                    CtxForkShard{..}      -> "CtxForkShard      " <+> epar
                     CtxForkCond{..}       -> "CtxForkCond       " <+> epar
                     CtxForkBody{..}       -> "CtxForkBody       " <+> epar
+                    CtxWithShard{..}      -> "CtxWithShard      " <+> epar
                     CtxWithCond{..}       -> "CtxWithCond       " <+> epar
                     CtxWithBody{..}       -> "CtxWithBody       " <+> epar
                     CtxWithDef{..}        -> "CtxWithDef        " <+> epar
+                    CtxAnyShard{..}       -> "CtxAnyShard       " <+> epar
                     CtxAnyCond{..}        -> "CtxAnyCond        " <+> epar
                     CtxAnyBody{..}        -> "CtxAnyBody        " <+> epar
                     CtxAnyDef{..}         -> "CtxAnyDef         " <+> epar
@@ -915,3 +922,11 @@ ctxIsQueryCond _             = False
 
 ctxInQueryCond :: ECtx -> Bool
 ctxInQueryCond ctx = any ctxIsQueryCond $ ctxAncestors ctx
+
+ctxIsShard :: ECtx -> Bool
+ctxIsShard CtxForkShard{} = True
+ctxIsShard CtxAnyShard{}  = True
+ctxIsShard CtxWithShard{} = True
+ctxIsShard _              = False
+
+ctxInShard ctx = any ctxIsDelete $ ctxAncestors ctx
