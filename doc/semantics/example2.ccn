@@ -69,6 +69,12 @@ table Route ( ip    : ip4_addr_t
 
 procedure processPacket(rport : RouterPort): sink = {
     match (pkt.payload) {
+        EthARP{arp} -> {
+            if (arp.op == ARPResponse) {
+                ARP.put(ARP{arp.spa, arp.sha})
+            };
+            drop
+        },
         EthIP4{ip4} -> {
             the (route in Route | route.ip == ip4.dst) {
                 the (outport in RouterPort | outport.id == route.rport) {
