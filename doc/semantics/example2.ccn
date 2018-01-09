@@ -68,27 +68,14 @@ table Route ( ip    : ip4_addr_t
             , foreign key (rport) references RouterPort(id) )
 
 procedure processPacket(rport : RouterPort): sink = {
-    // DNAT. Find a rule in the DNAT table that matches the
-    // destination IP address in the packet and update the address
-    // accordingly or drop the packet if there is not matching rule;
     match (pkt.payload) {
         EthIP4{ip4} -> {
-            // routing: find the matching route in the routing table;
-            // lookup the corresponsing router port
-            var dstip : ip4_addr_t;
             the (route in Route | route.ip == ip4.dst) {
                 the (outport in RouterPort | outport.id == route.rport) {
-                    // set source MAC do the MAC address of the output port
                     pkt.src = outport.mac;
-                    // lookup destination IP in the ARP table
                     the (arp in ARP | arp.ip == ip4.dst) {
-                        // found: update the source MAC address
                         pkt.dst = arp.mac
-                    } default {
-                        // Not found: send ARP request
-                        pkt.dst = 48'hffffffffffff;
-                        pkt.payload = EthARP{ARPPkt{ARPRequest, outport.mac, 48'hffffffffffff, outport.ip, ip4.dst}}
-                    };
+                    } default { drop };
 /*!!*/              send PRouterPort[outport].out
                 } default { drop }
 /*!!*/      } default {
