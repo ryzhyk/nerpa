@@ -40,7 +40,7 @@ then
 else
     (set +x; echo Compiling Datalog rules)
     pushd $workdir
-    cargo build
+    cargo build --release
     pushd $popd
 fi
 
@@ -57,4 +57,4 @@ set -e
 sudo psql postgres -f $workdir/$specname.schema
 
 (set +x; echo Starting Cocoon controller)
-sudo $COCOON_PATH -i $ccnname --action=controller --no-constraints
+sudo $COCOON_PATH -i $ccnname --action=controller --no-constraints +RTS -xc -RTS

@@ -8,11 +8,16 @@ import Text.PrettyPrint
 import PP
 
 dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc
-dataflogTemplate decls facts relations sets rules advance delta cleanup undo handlers = [r|#![allow(non_snake_case)]
+dataflogTemplate decls facts val relations sets rules delta cleanup undo handlers = [r|#![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 #![allow(non_shorthand_field_patterns)]
 #![allow(unused_variables)]
+#![feature(slice_patterns)]
+#![feature(box_patterns)]
+#![feature(box_syntax)]
+#![feature(match_default_bindings)]
 extern crate timely;
+extern crate timely_communication;
 #[macro_use]
 extern crate abomonation;
 extern crate differential_dataflow;
@@ -32,20 +37,24 @@ use std::str::FromStr;
 use serde::de::Error;
 use std::collections::HashSet;
 use std::collections::HashMap;
+use std::iter::FromIterator;
 use std::io::{stdin, stdout, Write};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::hash::Hash;
-use std::fmt::Debug;
 use serde_json as json;
 
 use timely::progress::nested::product::Product;
 use timely::dataflow::*;
-use timely::dataflow::scopes::Child;
+use timely::dataflow::scopes::{Child, Root};
 use timely::dataflow::operators::*;
 use timely::dataflow::operators::feedback::Handle;
+use timely::dataflow::operators::probe::Handle as ProbeHandle;
+use timely::progress::timestamp::RootTimestamp;
 
-use differential_dataflow::input::Input;
+use timely_communication::Allocator;
+
+
+use differential_dataflow::input::{Input, InputSession};
 use differential_dataflow::{Data, Collection, Hashable};
 use differential_dataflow::operators::*;
 use differential_dataflow::lattice::Lattice;
@@ -172,9 +181,18 @@ forward_binop!(impl Rem for Uint, rem);|]
     $$
     facts
     $$
+    val
+    $$
     relations
     $$ [r|
-
+impl Value {
+    fn field(&self) -> &Fact {
+        match self {
+            &Value::Fact(ref f) => f,
+            _ => unreachable!()
+        }
+    }
+}
 #[derive(Serialize, Deserialize, Debug)]
 enum Request {
     start,
@@ -192,8 +210,8 @@ enum Response<T> {
     ok(T)
 }
 
-fn xupd<T>(s: &Rc<RefCell<HashSet<T>>>, ds: &Rc<RefCell<HashMap<T, i8>>>, x:&T, w: isize) 
-where T: Eq + Hash + Clone + Debug {
+fn xupd(s: &Rc<RefCell<HashSet<Value>>>, ds: &Rc<RefCell<HashMap<Value, i8>>>, x : &Value, w: isize) 
+{
     if w > 0 {
         let new = s.borrow_mut().insert(x.clone());
         if new {
@@ -209,8 +227,8 @@ where T: Eq + Hash + Clone + Debug {
     }
 }
 
-fn upd<T>(s: &Rc<RefCell<HashSet<T>>>, x:&T, w: isize) 
-where T: Eq + Hash + Clone + Debug {
+fn upd(s: &Rc<RefCell<HashSet<Value>>>, x: &Value, w: isize) 
+{
     if w > 0 {
         s.borrow_mut().insert(x.clone());
     } else if w < 0 {
@@ -225,8 +243,7 @@ fn main() {
         let probe = probe::Handle::new();
         let mut probe1 = probe.clone();
 
-        let mut xaction : bool = false;
-|]
+        let mut xaction : bool = false;|]
     $$
     (nest' $ nest' sets)
     $$
@@ -246,70 +263,100 @@ fn main() {
                                 print!("{}\n", e);
                                 std::process::exit(-1);
                             }
-                        };|]
-    $$
-    (nest' $ nest' $ nest' advance)
-    $$ [r|
-            macro_rules! insert {
-                ($rel:ident, $set:ident, $args:expr) => {{
-                    let v = $args;
-                    if !$set.borrow().contains(&v) {
-                        $rel.insert(v);
-                        epoch = epoch+1;
-                        advance!();
-                        while probe.less_than($rel.time()) {
-                            worker.step();
                         };
+
+            fn advance(rels : &mut [InputSession<u64, Value, isize>], epoch : u64) {
+                for r in rels.into_iter() {
+                    //print!("advance\n");
+                    r.advance_to(epoch);
+                };
+                for r in rels.into_iter() {
+                    //print!("flush\n");
+                    r.flush();
+                }
+            }
+
+           
+            fn insert(worker : &mut Root<Allocator>, 
+                      rels : &mut [InputSession<u64, Value, isize>], 
+                      probe : &ProbeHandle<Product<RootTimestamp, u64>>,
+                      epoch : &mut u64, 
+                      rel : usize, 
+                      set : &Rc<RefCell<HashSet<Value>>>, 
+                      v: &Value)
+            {
+                if !set.borrow().contains(&v) {
+                    //print!("new value: {:?}\n", v);
+                    rels[rel].insert(v.clone());
+                    
+                    *epoch = *epoch+1;
+                    //print!("epoch: {}\n", epoch);
+                    advance(rels, *epoch);
+                    while probe.less_than(rels[rel].time()) {
+                        //print!("step\n");
+                        worker.step();
                     };
-                }}
+                };
             }
 
-            macro_rules! insert_resp {
-                ($rel:ident, $set:ident, $args:expr) => {{
-                    insert!($rel, $set, $args);
-                    let resp: Response<()> = Response::ok(());
-                    serde_json::to_writer(stdout(), &resp).unwrap();
-                    stdout().flush().unwrap();
-                }}
+            fn insert_resp (worker : &mut Root<Allocator>, 
+                            rels : &mut [InputSession<u64, Value, isize>], 
+                            probe : &ProbeHandle<Product<RootTimestamp, u64>>,
+                            epoch : &mut u64, 
+                            rel : usize, 
+                            set : &Rc<RefCell<HashSet<Value>>>, 
+                            v: &Value)
+            {
+                insert(worker, rels, probe, epoch, rel, set, v);
+                let resp: Response<()> = Response::ok(());
+                serde_json::to_writer(stdout(), &resp).unwrap();
+                stdout().flush().unwrap();
             }
 
-            macro_rules! remove {
-                ($rel:ident, $set:ident, $args:expr) => {{
-                    let v = $args;
-                    if $set.borrow().contains(&v) {
-                        $rel.remove(v);
-                        epoch = epoch+1;
-                        advance!();
-                        while probe.less_than($rel.time()) {
-                            worker.step();
-                        };
+            fn remove (worker : &mut Root<Allocator>, 
+                       rels : &mut [InputSession<u64, Value, isize>], 
+                       probe : &ProbeHandle<Product<RootTimestamp, u64>>,
+                       epoch : &mut u64, 
+                       rel : usize, 
+                       set : &Rc<RefCell<HashSet<Value>>>, 
+                       v: &Value) 
+            {
+                if set.borrow().contains(&v) {
+                    rels[rel].remove(v.clone());
+                    *epoch = *epoch+1;
+                    advance(rels, *epoch);
+                    while probe.less_than(rels[rel].time()) {
+                        worker.step();
                     };
-                }}
+                };
             }
 
-            macro_rules! remove_resp {
-                ($rel:ident, $set:ident, $args:expr) => {{
-                    remove!($rel, $set, $args);
-                    let resp: Response<()> = Response::ok(());
-                    serde_json::to_writer(stdout(), &resp).unwrap();
-                    stdout().flush().unwrap();
-                }}
+            fn remove_resp (worker : &mut Root<Allocator>, 
+                            rels : &mut [InputSession<u64, Value, isize>], 
+                            probe : &ProbeHandle<Product<RootTimestamp, u64>>,
+                            epoch : &mut u64, 
+                            rel : usize, 
+                            set : &Rc<RefCell<HashSet<Value>>>, 
+                            v: &Value) 
+            {
+                remove(worker, rels, probe, epoch, rel, set, v);
+                let resp: Response<()> = Response::ok(());
+                serde_json::to_writer(stdout(), &resp).unwrap();
+                stdout().flush().unwrap();
             }
 
-            macro_rules! check {
-                ($set:expr) => {{
-                    let resp = Response::ok(!$set.borrow().is_empty());
-                    serde_json::to_writer(stdout(), &resp).unwrap();
-                    stdout().flush().unwrap();
-                }}
+            fn check (set : &Rc<RefCell<HashSet<Value>>>) 
+            {
+                let resp = Response::ok(!set.borrow().is_empty());
+                serde_json::to_writer(stdout(), &resp).unwrap();
+                stdout().flush().unwrap();
             }
 
-            macro_rules! enm {
-                ($set:expr) => {{
-                    let resp = Response::ok((*$set).clone());
-                    serde_json::to_writer(stdout(), &resp).unwrap();
-                    stdout().flush().unwrap();
-                }}
+            fn enm (set : &Rc<RefCell<HashSet<Value>>>)
+            {
+                let resp = Response::ok(Vec::from_iter((**set).borrow().iter().map(|x| match x {&Value::Fact(ref f) => f.clone(), _ => unreachable!()})));
+                serde_json::to_writer(stdout(), &resp).unwrap();
+                stdout().flush().unwrap();
             }|]
     $$
     (nest' $ nest' $ nest' delta)
@@ -383,6 +430,9 @@ git="https://github.com/frankmcsherry/differential-dataflow.git"
 
 [dependencies.timely]
 git="https://github.com/frankmcsherry/timely-dataflow.git"
+
+[dependencies.timely_communication]
+git = "https://github.com/frankmcsherry/timely-dataflow"
 
 [dependencies.abomonation]
 git="https://github.com/frankmcsherry/abomonation.git"

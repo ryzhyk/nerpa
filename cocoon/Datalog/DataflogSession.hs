@@ -242,7 +242,7 @@ dfEnumRelation df rel = L.with (dfLock df) $ do
     resp <- req df json
     res <- respUnwrap resp
     case res of
-         J.Array facts -> mapM (rowFromJSON df rel) $ V.toList facts
+         J.Array facts -> mapM (factFromJSON df) $ V.toList facts
          _             -> err $ "Dataflog enum returned invalid value: " ++ show res
 
 dfCloseSession :: DFSession -> IO ()

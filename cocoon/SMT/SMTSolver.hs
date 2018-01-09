@@ -40,7 +40,7 @@ data Type = TBool
           | TStruct String
           | TTuple [Type]
           | TArray Type Int
-          deriving (Eq)
+          deriving (Eq, Ord)
 
 instance Show Type where
     show TBool        = "bool"
@@ -71,7 +71,7 @@ fieldConstructors s f = filter (any ((== f) . name) . consArgs) $ structCons s
 
 data Var = Var { varName :: String
                , varType :: Type} 
-               deriving (Show, Eq)
+               deriving (Show, Eq, Ord)
 
 
 instance WithName Var where
@@ -200,26 +200,29 @@ disj' (e:es) = EBinOp Or e (disj' es)
 type Assignment = M.Map String Expr
 
 typ :: SMTQuery -> Maybe Function -> Expr -> Type
-typ q mf (EVar n)          = maybe (varType $ fromJust $ find ((==n) . name) $ smtVars q)
-                                   (snd . fromJust . find ((==n) . fst) . funcArgs)
-                                   mf
-typ q _  (EField c _ f)    = varType $ fromJust $ find ((==f) . name) $ concatMap consArgs cs
-                             where Struct _ cs = getConsStruct q c
-typ _ _  (EBool _)         = TBool
-typ _ _  (EBit w _)        = TBit w
-typ _ _  (EInt _)          = TInt
-typ _ _  (EString _)       = TString
-typ q _  (EStruct c _)     = TStruct $ structName $ getConsStruct q c
-typ q mf (ETuple as)       = TTuple $ map (typ q mf) as
-typ _ _  (EIsInstance _ _) = TBool
-typ q mf (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
-                           | elem op [Plus, Minus, Mod] = typ q mf e1
-typ _ _  (EUnOp Not _)     = TBool 
-typ _ _  (ESlice _ h l)    = TBit (h-l+1)
-typ q mf (ECond _ d)       = typ q mf d
-typ q _  (EApply f _)      = funcType $ fromJust $ find ((==f) . name) $ smtFuncs q
-typ _ _  (ERelPred _ _)    = TBool 
-typ _ _  e                 = error $ "SMTSolver.typ " ++ show e
+typ q mf e = typ' q (smtVars q) mf e
+
+typ' :: SMTQuery -> [Var] -> Maybe Function -> Expr -> Type
+typ' _ vs mf (EVar n)          = maybe (varType $ fromJust $ find ((==n) . name) vs)
+                                       (snd . fromJust . find ((==n) . fst) . funcArgs)
+                                       mf
+typ' q _  _ (EField c _ f)    = varType $ fromJust $ find ((==f) . name) $ concatMap consArgs cs
+                                 where Struct _ cs = getConsStruct q c
+typ' _ _  _  (EBool _)         = TBool
+typ' _ _  _  (EBit w _)        = TBit w
+typ' _ _  _  (EInt _)          = TInt
+typ' _ _  _  (EString _)       = TString
+typ' q _  _  (EStruct c _)     = TStruct $ structName $ getConsStruct q c
+typ' q vs mf (ETuple as)       = TTuple $ map (typ' q vs mf) as
+typ' _ _  _  (EIsInstance _ _) = TBool
+typ' q vs mf (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
+                               | elem op [Plus, Minus, Mod] = typ' q vs mf e1
+typ' _ _  _  (EUnOp Not _)     = TBool 
+typ' _ _  _  (ESlice _ h l)    = TBit (h-l+1)
+typ' q vs mf (ECond _ d)       = typ' q vs mf d
+typ' q _  _  (EApply f _)      = funcType $ fromJust $ find ((==f) . name) $ smtFuncs q
+typ' _ _  _  (ERelPred _ _)    = TBool 
+typ' _ _  _  e                 = error $ "SMTSolver.typ' " ++ show e
 
 data SMTQuery = SMTQuery { smtStructs :: [Struct]
                          , smtVars    :: [Var]
@@ -236,6 +239,9 @@ getConsStruct q c = fromJust $ lookupConsStruct q c
 
 getConstructor :: SMTQuery -> String -> Constructor
 getConstructor q c = head $ concatMap (filter ((==c) . name) . structCons) $ smtStructs q
+
+getVar :: SMTQuery -> String -> Var
+getVar q vname = fromJust $ find ((==vname) . name) $ smtVars q
 
 data SMTSolver = SMTSolver {
     -- Input:  list of formula

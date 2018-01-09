@@ -172,7 +172,7 @@ main = do
                         Left e  -> error e
                         Right x -> return x
              let logfile = workdir </> addExtension basename "log"
-                 dfpath  = workdir </> "target" </> "debug" </> basename
+                 dfpath  = workdir </> "target" </> "release" </> basename
     {-
              mapM_ (\(rl, _, _) -> do let dotname = workdir </> addExtension (name rl) "dot"
                                       let odotname = workdir </> addExtension (addExtension (name rl) "opt") "dot"
