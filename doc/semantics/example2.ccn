@@ -1,0 +1,102 @@
+typedef mac_addr_t = bit<48>
+typedef ip4_addr_t = bit<32>
+
+typedef Packet = EthPacket { src : mac_addr_t
+                           , dst : mac_addr_t 
+                           , payload : eth_payload_t}
+
+typedef eth_payload_t = EthARP{arp : arp_pkt_t}
+                      | EthIP4{ip4 : ip4_pkt_t}
+
+typedef arp_op_t = ARPRequest
+                 | ARPResponse
+
+typedef arp_pkt_t = ARPPkt { op  : arp_op_t
+                           , sha : mac_addr_t
+                           , tha : mac_addr_t
+                           , spa : ip4_addr_t
+                           , tpa : ip4_addr_t }
+
+typedef ip4_pkt_t = IP4Pkt { src : ip4_addr_t
+                           , dst : ip4_addr_t
+                           }
+
+typedef router_id_t = bit<64>
+
+table Router ( id : router_id_t
+             , failed : bool
+             , primary key(id))
+
+typedef rport_id_t = bit<64>
+
+table RouterPort ( id      : rport_id_t
+                 , ip      : ip4_addr_t
+                 , mac     : mac_addr_t
+                 , enabled : bool
+                 , portnum : bit<16>
+                 , switch  : router_id_t
+                 , primary key (id)
+                 , unique (switch, portnum)
+                 , foreign key (switch) references Router(id))
+
+// Declare a family of ports indexed by the RouterPort table.
+// There will be one instance of PRouterPort for each record in the 
+// table. The processPacket method handles packets arriving 
+// to the port
+port PRouterPort[RouterPort](source processPacket, sink)
+
+// Declare a family of switches indexed by the Router table.
+// There will be one instance of SRouter for each record in the 
+// table.
+switch SRouter[Router]
+
+// ARP tables stores know IP-MAC address mappings
+state table ARP ( ip  : ip4_addr_t
+                , mac : mac_addr_t )
+
+// DNAT table stores DNAT rules to apply to incoming IP traffic
+table DNAT ( external_ip : ip4_addr_t
+           , internal_ip : ip4_addr_t)
+
+// LB table stores load balancing rules in the form of virtual/physical address pairs.
+table LB ( vip : ip4_addr_t
+         , pip : ip4_addr_t)
+
+// Simplified routing database: maps IP address to port on which this address is reachable
+table Route ( ip    : ip4_addr_t
+            , rport : rport_id_t
+            , foreign key (rport) references RouterPort(id) )
+
+procedure processPacket(rport : RouterPort): sink = {
+    // DNAT. Find a rule in the DNAT table that matches the
+    // destination IP address in the packet and update the address
+    // accordingly or drop the packet if there is not matching rule;
+    match (pkt.payload) {
+        EthIP4{ip4} -> {
+            // routing: find the matching route in the routing table;
+            // lookup the corresponsing router port
+            var dstip : ip4_addr_t;
+            the (route in Route | route.ip == ip4.dst) {
+                the (outport in RouterPort | outport.id == route.rport) {
+                    // set source MAC do the MAC address of the output port
+                    pkt.src = outport.mac;
+                    // lookup destination IP in the ARP table
+                    the (arp in ARP | arp.ip == ip4.dst) {
+                        // found: update the source MAC address
+                        pkt.dst = arp.mac
+                    } default {
+                        // Not found: send ARP request
+                        pkt.dst = 48'hffffffffffff;
+                        pkt.payload = EthARP{ARPPkt{ARPRequest, outport.mac, 48'hffffffffffff, outport.ip, ip4.dst}}
+                    };
+/*!!*/              send PRouterPort[outport].out
+                } default { drop }
+/*!!*/      } default {
+                fork (p in RouterPort | p.enabled) {
+/*!!*/              send PRouterPort[p].out
+                }
+            }
+        },
+/*!!*/  _ -> { drop } // drop any non-IP traffic
+    }
+}
