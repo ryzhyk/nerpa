@@ -140,9 +140,9 @@ mkUndo rels =
             "let mut d = __rDelta" <> n <> ".borrow_mut();" $$
             "for (k,v) in d.drain() {" $$
             "    if v == 1 {" $$
-            "        remove(worker, &mut rels, &probe, &mut epoch, " <> pp ridx <> ", &_r" <> n <> ", &k);" $$
+            "        remove(&mut rels, &mut epoch, " <> pp ridx <> ", &_r" <> n <> ", &k, &mut need_to_flush);" $$
             "    } else if v == -1 {" $$
-            "        insert(worker, &mut rels, &probe, &mut epoch, " <> pp ridx <> ", &_r" <> n <> ", &k);" $$
+            "        insert(&mut rels, &mut epoch, " <> pp ridx <> ", &_r" <> n <> ", &k, &mut need_to_flush);" $$
             "    };" $$
             "};") $ filter (not . relIsView . fst) $ zip rels [(0::Int)..]) $$
     "   }}" $$
@@ -179,10 +179,10 @@ mkSets rels =
 mkHandlers :: [Relation] -> Doc
 mkHandlers = vcat .
     mapIdx (\rel ridx -> let n = pp $ name rel in
-                        ("Request::add(f @ Fact::" <> n <> "(..)) => insert_resp(worker, &mut rels, &probe, &mut epoch, " <> pp ridx <> ", &_r" <> n <> ", &Value::Fact(f)),") $$
-                        ("Request::del(f @ Fact::" <> n <> "(..)) => remove_resp(worker, &mut rels, &probe, &mut epoch, " <> pp ridx <> ", &_r" <> n <> ", &Value::Fact(f)),") $$
-                        ("Request::chk(Relation::" <> n <> ") => check(&_r" <> n <> "),") $$
-                        ("Request::enm(Relation::" <> n <> ") => enm(&_r" <> n <> "),"))
+                        ("Request::add(f @ Fact::" <> n <> "(..)) => insert_resp(&mut rels, &mut epoch, " <> pp ridx <> ", &_r" <> n <> ", &Value::Fact(f), &mut need_to_flush),") $$
+                        ("Request::del(f @ Fact::" <> n <> "(..)) => remove_resp(&mut rels, &mut epoch, " <> pp ridx <> ", &_r" <> n <> ", &Value::Fact(f), &mut need_to_flush),") $$
+                        ("Request::chk(Relation::" <> n <> ") => check(&mut rels, &probe, worker, &mut need_to_flush, &_r" <> n <> "),") $$
+                        ("Request::enm(Relation::" <> n <> ") => enm(&mut rels, &probe, worker, &mut need_to_flush, &_r" <> n <> "),"))
 
 mkRules :: (?q::SMTQuery, ?rels::[Relation]) => [Rule] -> Doc
 mkRules rules = 

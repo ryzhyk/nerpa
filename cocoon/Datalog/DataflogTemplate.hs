@@ -248,8 +248,9 @@ fn main() {
     (nest' $ nest' sets)
     $$
     (nest' $ nest' rules)
-    $$ [r|
+    $$ [r|        
         let mut epoch = 0;
+        let mut need_to_flush = false;
         let stream = json::Deserializer::from_reader(stdin()).into_iter::<Request>();
 
         for val in stream {
@@ -270,20 +271,31 @@ fn main() {
                     //print!("advance\n");
                     r.advance_to(epoch);
                 };
-                for r in rels.into_iter() {
-                    //print!("flush\n");
-                    r.flush();
+            }
+
+            fn flush( rels : &mut [InputSession<u64, Value, isize>]
+                    , probe : &ProbeHandle<Product<RootTimestamp, u64>>
+                    , worker : &mut Root<Allocator>
+                    , need_to_flush : &mut bool) {
+                if *need_to_flush {
+                    for r in rels.into_iter() {
+                        //print!("flush\n");
+                        r.flush();
+                    };
+                    while probe.less_than(rels[0].time()) {
+                        worker.step();
+                    };
+                    *need_to_flush = false
                 }
             }
 
            
-            fn insert(worker : &mut Root<Allocator>, 
-                      rels : &mut [InputSession<u64, Value, isize>], 
-                      probe : &ProbeHandle<Product<RootTimestamp, u64>>,
+            fn insert( rels : &mut [InputSession<u64, Value, isize>], 
                       epoch : &mut u64, 
                       rel : usize, 
                       set : &Rc<RefCell<HashSet<Value>>>, 
-                      v: &Value)
+                      v: &Value,
+                      need_to_flush: &mut bool)
             {
                 if !set.borrow().contains(&v) {
                     //print!("new value: {:?}\n", v);
@@ -292,68 +304,70 @@ fn main() {
                     *epoch = *epoch+1;
                     //print!("epoch: {}\n", epoch);
                     advance(rels, *epoch);
-                    while probe.less_than(rels[rel].time()) {
-                        //print!("step\n");
-                        worker.step();
-                    };
+                    *need_to_flush = true
                 };
             }
 
-            fn insert_resp (worker : &mut Root<Allocator>, 
-                            rels : &mut [InputSession<u64, Value, isize>], 
-                            probe : &ProbeHandle<Product<RootTimestamp, u64>>,
+            fn insert_resp (rels : &mut [InputSession<u64, Value, isize>], 
                             epoch : &mut u64, 
                             rel : usize, 
                             set : &Rc<RefCell<HashSet<Value>>>, 
-                            v: &Value)
+                            v: &Value,
+                            need_to_flush : &mut bool)
             {
-                insert(worker, rels, probe, epoch, rel, set, v);
+                insert(rels, epoch, rel, set, v, need_to_flush);
                 let resp: Response<()> = Response::ok(());
                 serde_json::to_writer(stdout(), &resp).unwrap();
                 stdout().flush().unwrap();
             }
 
-            fn remove (worker : &mut Root<Allocator>, 
-                       rels : &mut [InputSession<u64, Value, isize>], 
-                       probe : &ProbeHandle<Product<RootTimestamp, u64>>,
+            fn remove (rels : &mut [InputSession<u64, Value, isize>], 
                        epoch : &mut u64, 
                        rel : usize, 
                        set : &Rc<RefCell<HashSet<Value>>>, 
-                       v: &Value) 
+                       v: &Value,
+                       need_to_flush : &mut bool) 
             {
                 if set.borrow().contains(&v) {
                     rels[rel].remove(v.clone());
                     *epoch = *epoch+1;
                     advance(rels, *epoch);
-                    while probe.less_than(rels[rel].time()) {
-                        worker.step();
-                    };
+                    *need_to_flush = true
                 };
             }
 
-            fn remove_resp (worker : &mut Root<Allocator>, 
-                            rels : &mut [InputSession<u64, Value, isize>], 
-                            probe : &ProbeHandle<Product<RootTimestamp, u64>>,
+            fn remove_resp (rels : &mut [InputSession<u64, Value, isize>], 
                             epoch : &mut u64, 
                             rel : usize, 
                             set : &Rc<RefCell<HashSet<Value>>>, 
-                            v: &Value) 
+                            v: &Value,
+                            need_to_flush : &mut bool) 
             {
-                remove(worker, rels, probe, epoch, rel, set, v);
+                remove(rels, epoch, rel, set, v, need_to_flush);
                 let resp: Response<()> = Response::ok(());
                 serde_json::to_writer(stdout(), &resp).unwrap();
                 stdout().flush().unwrap();
             }
 
-            fn check (set : &Rc<RefCell<HashSet<Value>>>) 
+            fn check ( rels : &mut [InputSession<u64, Value, isize>]
+                     , probe : &ProbeHandle<Product<RootTimestamp, u64>>
+                     , worker : &mut Root<Allocator>
+                     , need_to_flush : &mut bool
+                     , set : &Rc<RefCell<HashSet<Value>>>) 
             {
+                flush(rels, probe, worker, need_to_flush);
                 let resp = Response::ok(!set.borrow().is_empty());
                 serde_json::to_writer(stdout(), &resp).unwrap();
                 stdout().flush().unwrap();
             }
 
-            fn enm (set : &Rc<RefCell<HashSet<Value>>>)
+            fn enm ( rels : &mut [InputSession<u64, Value, isize>]
+                   , probe : &ProbeHandle<Product<RootTimestamp, u64>>
+                   , worker : &mut Root<Allocator>
+                   , need_to_flush : &mut bool
+                   , set : &Rc<RefCell<HashSet<Value>>>)
             {
+                flush(rels, probe, worker, need_to_flush);
                 let resp = Response::ok(Vec::from_iter((**set).borrow().iter().map(|x| match x {&Value::Fact(ref f) => f.clone(), _ => unreachable!()})));
                 serde_json::to_writer(stdout(), &resp).unwrap();
                 stdout().flush().unwrap();
@@ -367,6 +381,7 @@ fn main() {
     $$ [r|
             match req {
                 Request::start                       => {
+                    flush(&mut rels, &probe, worker, &mut need_to_flush);
                     let resp = if xaction {
                                    Response::err(format!("transaction already in progress"))
                                } else {
@@ -378,6 +393,7 @@ fn main() {
                     stdout().flush().unwrap();
                 },
                 Request::rollback                    => {
+                    flush(&mut rels, &probe, worker, &mut need_to_flush);
                     let resp = if !xaction {
                                    Response::err(format!("no transaction in progress"))
                                } else {
@@ -390,6 +406,7 @@ fn main() {
                     stdout().flush().unwrap();
                 },
                 Request::commit                      => {
+                    flush(&mut rels, &probe, worker, &mut need_to_flush);
                     let resp = if !xaction {
                                    Response::err(format!("no transaction in progress"))
                                } else {
@@ -398,7 +415,7 @@ fn main() {
                                    delta_cleanup!();
                                    xaction = false;
                                    Response::ok(delta)
-                               };
+                              };
                     serde_json::to_writer(stdout(), &resp).unwrap();
                     stdout().flush().unwrap();
                 },|]
