@@ -19,6 +19,9 @@ import netaddr
 import pickle
 import csv
 import itertools
+import time
+
+sys.setrecursionlimit(100000)
 
 class PersistentStore:
     """Very simple key-value store.  Keys are strings, values are arbitrary Python objects."""
@@ -282,26 +285,7 @@ GlobalOption
 
 Options_command_args
 : EMPTY
-| OptionsCommandList
-;
-
-OptionsCommandList
-: FirstCommand
-| FirstCommand SeparatedCommandsList
-;
-
-FirstCommand
-: "--" OptionsCommand
-| OptionsCommand
-;
-
-SeparatedCommandsList
-: EMPTY
-| "--" OptionsCommand SeparatedCommandsList
-;
-
-OptionsCommand
-: "init"
+| "init"
 | "show" Switch?
 | LsAdd
 | LsDel
@@ -442,26 +426,7 @@ GlobalOption
 
 Options_command_args
 : EMPTY
-| OptionsCommandList
-;
-
-OptionsCommandList
-: FirstCommand
-| FirstCommand SeparatedCommandsList
-;
-
-FirstCommand
-: "--" OptionsCommand
-| OptionsCommand
-;
-
-SeparatedCommandsList
-: EMPTY
-| "--" OptionsCommand SeparatedCommandsList
-;
-
-OptionsCommand
-: AddBr
+| AddBr
 | DelBr
 | AddPort
 | Set
@@ -564,13 +529,14 @@ def getAddressParser():
     g = parglare.Grammar.from_string(addressGrammar)
     return parglare.Parser(g, build_tree=True)
 
-val_parser = getValueParser()
-addr_parser = getAddressParser()
 
 def cocoon(cmd):
     log("cocoon command: " + cmd)
+    start_time = time.clock()
     proc = subprocess.Popen([cocoon_path, "--action=cmd"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     (out, err) = proc.communicate(cmd)
+    elapsed_time = time.clock() - start_time
+    log("cocoon runtime: " + str(elapsed_time))
     log("cocoon stdout: " + out)
     log("cocoon stderr: " + err)
 
@@ -610,37 +576,42 @@ def callOriginal(options):
     subprocess.call(options)
 
 def main():
-    impersonate = ntpath.basename(sys.argv[0])
-
-    # update these with the location and names of the actual binaries
-    currentParser = None
-    originalCommand = None
-    ovsHome = os.environ.get("OVSHOME")
-
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 1 and sys.argv[1] == "replay":
+        # replay pre-recorded commands
+        with open("commands.txt", "r") as file:
+            commands = file.readlines()
+            for cmd in commands:
+                (impersonate, x, args) = cmd.partition(" ")
+                doImpersonate(impersonate, args)
+    elif len(sys.argv) > 1:
+        impersonate = ntpath.basename(sys.argv[0])
         # Given arguments start impersonating the respective binary
         line = ""
         for arg in sys.argv[1:]:
             if " " in arg:
                 arg = "'" + arg + "'"
             line += " " + arg
-
-        if impersonate == "ovn-nbctl":
-            if impersonateOVN(line) == True:
-                originalCommand = ovsHome + "ovn/utilities/ovn-nbctl"
-                sys.argv[0] = originalCommand
-                callOriginal(sys.argv)
-        elif impersonate == "ovs-vsctl":
-            originalCommand = ovsHome + "utilities/ovs-vsctl"
-            options = [originalCommand] + sys.argv[1:]
-            callOriginal(options)
-            impersonateOVS(line)
-        elif impersonate == "ovn-controller":
-            # just block ovn-controller invocation
-            return
+        
+        with open("commands.txt", "a") as file:
+            file.write(impersonate + ' ' + line + '\n')
+        doImpersonate(impersonate, line)
     else:
         # otherwise just run tests
         test()
+
+def doImpersonate(impersonate, line):
+    ovsHome = os.environ.get("OVSHOME")
+    originalCommand = None
+    if impersonate == "ovn-nbctl":
+        impersonateOVN(line)
+    elif impersonate == "ovs-vsctl":
+        originalCommand = ovsHome + "utilities/ovs-vsctl"
+        options = [originalCommand] + sys.argv[1:]
+        callOriginal(options)
+        impersonateOVS(line)
+    elif impersonate == "ovn-controller":
+        # just block ovn-controller invocation
+        return
 
 def getOvnParser():
     g = parglare.Grammar.from_string(ovnGrammar)
@@ -818,6 +789,7 @@ def mkConst(const):
         store.close()
         #ovs_vsctl(["--columns=addresses", "find", "Address_Set", "name=" + const.children[0].children[1].value])
         log("address list: " + str(vals))
+        #val_parser = getValueParser()
         #vals = val_parser.parse(addrs[addrs.find("[") + 1 : addrs.find("]")]).children[0]
         return map(lambda x: mkAddress(x[1:-1]), vals)
     else:
@@ -978,22 +950,29 @@ def allocZone():
 
 def impersonateOVN(line):
     parser = getOvnParser()
-    options = None
-    try:
-        options = parseOptions(parser, line)
-    except parglare.exceptions.ParseError as e:
-        print "impersonateOVN: error parsing:", line, str(e)
-        raise e
-
+    parts = line.split(" -- ")
     log('\novn-nbctl' + line)
-    log(options.tree_str())
-    cmds = getCommands(options)
-    for cmd in cmds:
+    cocooncmds = []
+    for part in parts:
+        cmd = None
+        try:
+            cmdargs = getField(parseOptions(parser, part), "Options_command_args")
+            if len(cmdargs.children) == 0:
+                continue
+            cmd = cmdargs.children[0]
+        except parglare.exceptions.ParseError as e:
+            print "impersonateOVN: error parsing:", part, str(e)
+            raise e
+
+        log(cmd.tree_str())
         log('command symbol: ' + cmd.symbol.name)
         if cmd.symbol.name in ovnHandlers:
-            ovnHandlers[cmd.symbol.name](cmd)
+            cocooncmds += ovnHandlers[cmd.symbol.name](cmd)
         else:
             log('unknown command, ignoring')
+    cocooncmd = ";\n".join(cocooncmds)
+    if cocooncmd != "":
+        cocoon(cocooncmd)
 
 def getCommands(options):
     cmds = getField(options, 'Options_command_args')
@@ -1010,12 +989,13 @@ def getCommands(options):
 
 def ovnInit(cmd):
     log('init: nothing to do here')
+    return []
 
 def ovnLrAdd(cmd):
     ropt = getField(cmd, 'Router_opt')
     rname = getField(ropt, 'Router').children[0].value
     log('adding router ' + rname)
-    cocoon('LogicalRouter.put(LogicalRouter{' + mkRtId(rname) + ', true, "' + rname + '", RouterRegular})')
+    return ['LogicalRouter.put(LogicalRouter{' + mkRtId(rname) + ', true, "' + rname + '", RouterRegular})']
 
 def ovnLrpAdd(cmd):
     rt = getField(cmd, 'Router').children[0].value
@@ -1024,16 +1004,17 @@ def ovnLrpAdd(cmd):
     addr_str = addrStr(addr)
     (mac, subnets) = mkMACIPs(addr)
     zone = allocZone()
-    cocoon('LogicalRouterPort.put(LogicalRouterPort{' +
-             ', '.join([mkRPortId(port), '"' + port + '"', mkRtId(rt), 'LRPRegular', mac, 'true', 'NoPeer', str(zone)]) + '})')
+    cmds = ['LogicalRouterPort.put(LogicalRouterPort{' +
+            ', '.join([mkRPortId(port), '"' + port + '"', mkRtId(rt), 'LRPRegular', mac, 'true', 'NoPeer', str(zone)]) + '})']
     for subnet in subnets: 
-        cocoon('LRouterPortNetwork.put(LRouterPortNetwork{' + ', '.join([mkRPortId(port), subnet]) + '})')
-   
+        cmds.append('LRouterPortNetwork.put(LRouterPortNetwork{' + ', '.join([mkRPortId(port), subnet]) + '})')
+    return cmds
+
 def ovnLsAdd(cmd):
     swopt = getField(cmd, 'Switch_opt')
     swname = getField(swopt, 'Switch').children[0].value
     log('adding switch ' + swname)
-    cocoon('LogicalSwitch.put(LogicalSwitch{' + mkSwId(swname) + ', LSwitchRegular, "' + swname + '", NoSubnet})')
+    return ['LogicalSwitch.put(LogicalSwitch{' + mkSwId(swname) + ', LSwitchRegular, "' + swname + '", NoSubnet})']
 
 def ovnLspAdd(cmd):
     sw = getField(cmd, 'Switch').children[0].value
@@ -1048,22 +1029,23 @@ def ovnLspAdd(cmd):
     else:
         log('adding switch port ' + sw + ' ' + port)
         zone = allocZone()
-        cocoon('LogicalSwitchPort.put(LogicalSwitchPort{' +
-                 ', '.join([mkLPortId(port), mkSwId(sw), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', str(zone)]) + '})')
+        return ['LogicalSwitchPort.put(LogicalSwitchPort{' +
+                ', '.join([mkLPortId(port), mkSwId(sw), 'LPortVM{}', '"'+port+'"', 'true', 'NoDHCP4Options', 'NoDHCP6Options', 'false', str(zone)]) + '})']
 
 def ovnLspSetAddresses(cmd):
     port = getField(cmd, 'Port').children[0].value
     addrs = getList(getField(cmd, 'Addresses'), 'Address', 'Addresses')
     addr_strs = map(addrStr, addrs)
     log('adding switch port addresses ' + port + ' ' + ','.join(addr_strs))
-    doOvnLspSetAddresses(port, addrs)
+    return doOvnLspSetAddresses(port, addrs)
 
 def doOvnLspSetAddresses(port, addrs):
-    cocoon("{LogicalSwitchPortMAC.delete(?.lport==" + mkLPortId(port) + "); LogicalSwitchPortIP.delete(?.lport==" + mkLPortId(port) + ")}")
+    #cmds = ["{LogicalSwitchPortMAC.delete(?.lport==" + mkLPortId(port) + "); LogicalSwitchPortIP.delete(?.lport==" + mkLPortId(port) + ")}"]
+    cmds = []
     for addr in addrs:
         addrtype = addr.children[0].symbol.name
         if addrtype == "unknown":
-            cocoon("the (lp in LogicalSwitchPort | lp.id == " + mkLPortId(port)+ ") {LogicalSwitchPort.delete(?.id == lp.id); lp.unknown_addr=true; LogicalSwitchPort.put(lp)}")
+            cmds.append("the (lp in LogicalSwitchPort | lp.id == " + mkLPortId(port)+ ") {LogicalSwitchPort.delete(?.id == lp.id); lp.unknown_addr=true; LogicalSwitchPort.put(lp)}")
         elif addrtype == "dynamic":
             #cocoon("LogicalSwitchPortDynAddr.put(LogicalSwitchPortDynAddr{" + ", ".join([???, mkId(port, 8), "0", "NoIPAddr"]) + "})")
             raise Exception("not implemented: lsp-set-addresses dynamic")
@@ -1071,13 +1053,14 @@ def doOvnLspSetAddresses(port, addrs):
             raise Exception("not implemented: lsp-set-addresses router")
         else:
             mac = mkMACAddr(getField(addr, 'EthAddress').value)
-            cocoon("LogicalSwitchPortMAC.put(LogicalSwitchPortMAC{" + mkLPortId(port) + ", " + mac + "})")
+            cmds.append("LogicalSwitchPortMAC.put(LogicalSwitchPortMAC{" + mkLPortId(port) + ", " + mac + "})")
             ips = map(mkIPAddr,
                       itertools.takewhile(lambda x: x.children[0].symbol.name != "invalid",
                                           getList(getField(addr, 'IpAddressList'), 'IpAddress', 'IpAddressList')))
             log("ips: " + str(ips))
             for ip in ips:
-                cocoon("LogicalSwitchPortIP.put(LogicalSwitchPortIP{" + mkLPortId(port) + ", " + mac + ", " + ip + "})")
+                cmds.append("LogicalSwitchPortIP.put(LogicalSwitchPortIP{" + mkLPortId(port) + ", " + mac + ", " + ip + "})")
+    return cmds
 
 def addrStr(addr):
     if addr.children[0].symbol.name == "unknown":
@@ -1103,12 +1086,14 @@ def ovnLspSetPortSecurity(cmd):
     addr_strs = map(addrStr, addrs)
     #for addr in addrs:
     log('lsp-set-port-security ' + port + ' ' + ','.join(addr_strs))
+    cmds = []
     for addr in addrs:
         (mac, subnets) = mkMACIPs(addr) 
-        cocoon("PortSecurityMAC.put(PortSecurityMAC{" + mkLPortId(port) + ", " + mac + "})")
+        cmds.append("PortSecurityMAC.put(PortSecurityMAC{" + mkLPortId(port) + ", " + mac + "})")
         log("subnets: " + str(subnets))
         for subnet in subnets:
-            cocoon("PortsecurityIP.put(PortSecurityIP{" + mkLPortId(port) + ", " + mac + ", " + subnet + "})")
+            cmds.append("PortsecurityIP.put(PortSecurityIP{" + mkLPortId(port) + ", " + mac + ", " + subnet + "})")
+    return cmds
 
 def ovnAclAdd(cmd):
     sw        = getField(cmd, 'Switch').children[0].value
@@ -1117,7 +1102,7 @@ def ovnAclAdd(cmd):
     match     = mkExpr(getField(cmd, 'Match').children[0])
     verdict   = mkVerdict(getField(cmd, 'Verdict').children[0].value)
     log('acl-add ' + ' '.join([sw, direction, prio, match, verdict]))
-    cocoon("ACL.put(ACL{" + ", ".join([mkSwId(sw), prio, direction, "\\(p:Packet, lp:lport_id_t): bool =" + match, verdict])  + "})")
+    return ["ACL.put(ACL{" + ", ".join([mkSwId(sw), prio, direction, "\\(p:Packet, lp:lport_id_t): bool =" + match, verdict])  + "})"]
 
 def ovnCreate(cmd):
     table = getField(cmd, 'Table').children[0].value
@@ -1130,6 +1115,7 @@ def ovnCreate(cmd):
         store.set(key, vals)
         store.close()
     log('create ' + table + ' ' + ' '.join(map(formatTableEntry, entries)))
+    return []
 
 def ovnSet(cmd):
     table = getField(cmd, 'Table').children[0].value
@@ -1137,18 +1123,24 @@ def ovnSet(cmd):
     entries = getList(getField(cmd, 'TableEntry_1'), 'TableEntry', 'TableEntry_1')
     log("set " + table + ' ' + record + ' ' + ' '.join(map(formatTableEntry, entries)))
     if table == "Logical_Switch_Port":
-        ovnSetLSP(record, entries)
+        return ovnSetLSP(record, entries)
+    else:
+        return []
 
 def ovnSetLSP(port, entries):
     d = dict(map(lambda x: ((x[0], x[1]), x[2]), map(getTableEntry, entries)))
+    cmds=[]
     if ('type', None) in d:
         if d[('type', None)] == ['router']:
             if ('options', 'router-port') in d:
                 rp = d[('options', 'router-port')][0]
-                cocoon("the (lp in LogicalSwitchPort | lp.id == " + mkLPortId(port)+ ") {LogicalSwitchPort.delete(?.id == lp.id); lp.ptype=LPortRouter{" + mkRPortId(rp) + "}; LogicalSwitchPort.put(lp)}")
+                #cocoon("the (lp in LogicalSwitchPort | lp.id == " + mkLPortId(port)+ ") {LogicalSwitchPort.delete(?.id == lp.id); lp.ptype=LPortRouter{" + mkRPortId(rp) + "}; LogicalSwitchPort.put(lp)}")
+                cmds.append("the (lp in LogicalSwitchPort | lp.id == " + mkLPortId(port)+ ") {LogicalSwitchPort.delete(?.id == lp.id); lp.ptype=LPortRouter{" + mkRPortId(rp) + "}; LogicalSwitchPort.put(lp)}")
     if ('addresses', None) in d:
+        addr_parser = getAddressParser()
         addrs = map(lambda x: addr_parser.parse(x).children[0], d[('addresses', None)])
-        doOvnLspSetAddresses(port, addrs)
+        cmds += doOvnLspSetAddresses(port, addrs)
+    return cmds
 
 ovnHandlers = { 'init'               : ovnInit
               , 'LsAdd'              : ovnLsAdd
@@ -1163,22 +1155,30 @@ ovnHandlers = { 'init'               : ovnInit
               }
 
 def impersonateOVS(line):
-    parser = getOvsParser()
-    try:
-        options = parseOptions(parser, line)
-    except parglare.exceptions.ParseError as e:
-        print "impersonateOVS: error parsing", "`" + line + "'", str(e)
-        return ()
     log('\novs-vsctl' + line)
-    log(options.tree_str())
-    cmds = getCommands(options)
-    for cmd in cmds:
-        cmdname = cmd.symbol.name
-        log('command symbol: ' + cmdname)
-        if cmdname in ovsHandlers:
-            ovsHandlers[cmdname](cmd)
+    parser = getOvsParser()
+    parts = line.split(" -- ")
+    cocooncmds = []
+    for part in parts:
+        cmd = None
+        try:
+            cmdargs = getField(parseOptions(parser, part), "Options_command_args")
+            if len(cmdargs.children) == 0:
+                continue
+            cmd = cmdargs.children[0]
+        except parglare.exceptions.ParseError as e:
+            print "impersonateOVS: error parsing:", part, str(e)
+            raise e
+
+        log(cmd.tree_str())
+        log('command symbol: ' + cmd.symbol.name)
+        if cmd.symbol.name in ovsHandlers:
+            cocooncmds += ovsHandlers[cmd.symbol.name](cmd)
         else:
             log('unknown command, ignoring')
+    cocooncmd = ";\n".join(cocooncmds)
+    if cocooncmd != "":
+        cocoon(cocooncmd)
 
 def ovsAddBr(cmd):
     br = getField(cmd, 'Bridge').children[0].value
@@ -1195,9 +1195,10 @@ def ovsAddBr(cmd):
         ovs_vsctl(["set-controller", br, "tcp:127.0.0.1:6633"])
         hypervisor = getHyhpervisor()
         server = '"unix:' + ovs_rundir + '/' + br + '.mgmt' + '"'
-        cocoon("Chassis.put(Chassis{" + ", ".join([mkChassisId(hypervisor), "false", server, '""'])  + "})")
+        return ["Chassis.put(Chassis{" + ", ".join([mkChassisId(hypervisor), "false", server, '""'])  + "})"]
     else:
         log("cocoon does not care about this bridge")
+        return []
 
 def ovsAddPort(cmd):
     br = getField(cmd, 'Bridge').children[0].value
@@ -1206,32 +1207,41 @@ def ovsAddPort(cmd):
     log("add-port " + br + ' ' + port + ' ' + ' '.join(map(formatTableEntry, entries)))
     if br == "br-int":
         hypervisor = getHyhpervisor()
-        pnum = ovs_vsctl(["get", "Interface", port, "ofport"])
-        cocoon("VSwitchPort.put(VSwitchPort{" + ", ".join([mkVPortId(port), '"' + port + '"', mkChassisId(hypervisor), pnum])  + "})")
+        pnum = None
+        for e in entries:
+            (col, key, vals) = getTableEntry(e)
+            if col == "ofport-request":
+                pnum = vals[0]
+        if pnum == None:
+            pnum = ovs_vsctl(["get", "Interface", port, "ofport"])
+        return ["VSwitchPort.put(VSwitchPort{" + ", ".join([mkVPortId(port), '"' + port + '"', mkChassisId(hypervisor), pnum])  + "})"]
     else:
         log("cocoon does not care about this port")
-
-
+        return []
 
 def ovsSet(cmd):
     table = getField(cmd, 'Table').children[0].value
     record = getField(cmd, 'Record').children[0].value
     entries = getList(getField(cmd, 'TableEntry_1'), 'TableEntry', 'TableEntry_1')
     log("set " + table + ' ' + record + ' ' + ' '.join(map(formatTableEntry, entries)))
+    cmds = []
     if table == "Interface":
         for e in entries:
-            ovsSetInterface(record, e)
+            cmds += ovsSetInterface(record, e)
     elif table == "Open_vSwitch":
         for e in entries:
-            ovsSetOVS(e)
+            cmds += ovsSetOVS(e)
     elif table == "bridge" and record == "br-int":
         for e in entries:
-            ovsSetBridge(e)
+            cmds += ovsSetBridge(e)
+    return cmds
 
 def ovsSetInterface(iface, e):
     (col, key, vals) = getTableEntry(e)
     if col == "external-ids" and key == "iface-id":
-        cocoon("LPortBinding.put(LPortBinding{" + mkLPortId(vals[0]) + ", " + mkVPortId(iface)  + "})")
+        return ["LPortBinding.put(LPortBinding{" + mkLPortId(vals[0]) + ", " + mkVPortId(iface)  + "})"]
+    else: 
+        return []
 
 def ovsSetOVS(e):
     (col, key, vals) = getTableEntry(e)
@@ -1241,10 +1251,12 @@ def ovsSetOVS(e):
         vxportname = hypervisor + "-vxlan"
         ovs_vsctl(["add-port", "br-int", vxportname, "--", "set", "interface", vxportname, "type=vxlan", "options:remote_ip=flow", "options:local_ip="+vals[0], "options:key=flow"])
         pnum = ovs_vsctl(["get", "Interface", vxportname, "ofport"])
-        cocoon("TunnelPort.put(TunnelPort{" + ", ".join([mkTunPortId(hypervisor), pnum, mkChassisId(hypervisor), ip]) + "})")
+        return ["TunnelPort.put(TunnelPort{" + ", ".join([mkTunPortId(hypervisor), pnum, mkChassisId(hypervisor), ip]) + "})"]
+    else:
+        return []
 
 def ovsSetBridge(e):
-    return
+    return []
 
 ovsHandlers = { 'AddBr'     : ovsAddBr
               , 'AddPort'   : ovsAddPort
