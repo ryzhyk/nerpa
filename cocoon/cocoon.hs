@@ -193,7 +193,9 @@ main = do
                    $ refinePortRoles combined -}
              putStrLn "Starting controller"
              controllerStart workdir backend basename dfpath logfile (confCtlPort config) (confNoConstraints config) combined ir
-             controllerCLI histfile (confCtlPort config)
+             --controllerCLI histfile (confCtlPort config)
+             resp <- executeCmd (confCtlPort config) ":connect"
+             putStrLn resp
          ActionNone -> error "action not specified"
  
 readValidateAddDelta :: FilePath -> FilePath -> IO Refine
