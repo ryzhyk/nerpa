@@ -512,7 +512,7 @@ Addr
 ;
 """ + ovnGrammar
 
-logfile = open(os.environ.get("OVSHOME") + "/test.log", 'a')
+logfile = open(os.environ.get("LOGFILE"), 'a')
 cocoon_path = os.environ.get("COCOON_PATH")
 ovs_rundir = os.environ.get("OVS_RUNDIR")
 storefile = os.environ.get("OVSHOME") + "/test.store"

@@ -57,4 +57,4 @@ set -e
 sudo psql postgres -f $workdir/$specname.schema
 
 (set +x; echo Starting Cocoon controller)
-sudo $COCOON_PATH -i $ccnname --action=controller --no-constraints +RTS -xc -RTS
+sudo $COCOON_PATH -i $ccnname --action=controller --no-constraints
