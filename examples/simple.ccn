@@ -1,25 +1,23 @@
-typedef uuid_t = bit<12>
-typedef port_id_t  = uuid_t
-typedef vlan_id_t = bit<12>
+typedef id_t = bit<12>
+
+typedef struct_type_t = Constructor1 {field1 : id_t}
+                      | Constructor2 {field1 : id_t, field2 : bool}
 
 typedef Packet = Packet
 
-table LogicalPort( name      : port_id_t
-                 , switch_id : uuid_t
-                 , parent    : port_id_t
-                 , tag       : vlan_id_t
-                 , primary key (name)
-                 //, foreign key (switch_id)                 references LogicalSwitch(uuid)
-                 //, foreign key (parent)                    references LogicalPort(name)
-                 , unique (parent, tag) /* Siblings must have different tags */)
+table Rel1( id      : id_t
+          , tag     : bit<32>)
 
-view ParentPort( child_name    : port_id_t
-               , child_switch  : uuid_t
-               , parent_name   : port_id_t
-               , parent_switch : uuid_t
-               , check child_switch == parent_switch)
+table Rel2( id      : id_t
+          , flag    : bool)
 
-ParentPort(cn: port_id_t, cs: uuid_t, pn, ps) :- LogicalPort(cn, cs, pn, _),
-                                                 LogicalPort(pn, ps, pp, _)
+view View1(id1 : id_t, tag : bit<32>, id2 : id_t)
 
-function test(x:bool): bool = x
+View1(id1, tag, id2) :- Rel1(id1, tag), Rel2(id2, flag), flag
+View1(id1, tag, id2) :- Rel1(id1, tag), Rel2(id2, _), tag == 0
+
+//view View2(id1 : id_t, s : struct_type_t)
+
+//View2(id1, tag, id2) :- Rel1(id1, tag), Rel2(id2, flag), not flag
+//View2(id1, tag, id2) :- Rel1(id1, tag), Rel2(id2, _), tag == 0
+

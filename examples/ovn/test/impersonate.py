@@ -544,7 +544,7 @@ def ovs_vsctl(cmd):
     ovsHome = os.environ.get("OVSHOME")
     ovs = ovsHome + "utilities/ovs-vsctl"
     log("ovs_vsctl command: " + " ".join(cmd))
-    output = subprocess.check_output([ovs] + cmd).strip()
+    output = subprocess.check_output([ovs] + cmd, stderr=subprocess.STDOUT).strip()
     log("ovs_vsctl output: " + output)
     return output
 
