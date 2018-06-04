@@ -1,13 +1,5 @@
-# Cocoon: Correct by Construction Networking 
+# Nerpa: NEtwork programming with Relational and Procedural Abstractions
 
-Cocoon (for Correct by Construction Networking), is an SDN programming language 
-designed around the idea of iterative refinement.  The 
-network programmer starts with a high-level description of the 
-desired network behavior, focusing on the service the network 
-should provide to each packet, as opposed to how this service is 
-implemented within the network fabric.  The programmer then 
-iteratively refines the top-level specification, adding details of 
-the topology, routing, fault recovery, etc., until reaching a 
-level of detail sufficient for the Cocoon compiler to generate an 
-SDN application that manages network switches via the southbound 
-interface (we currently support P4).  
+Nerpa is a new programming language for Software Defined Networks (SDN).
+
+For an example of a Nerpa program, check out our [re-implementation of the OVN Open Virtual Network in Nerpa](examples/ovn)
